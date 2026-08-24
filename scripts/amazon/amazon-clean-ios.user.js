@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Augmenté — Amazon Clean iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.2.0
+// @version      0.2.1
 // @description  Nettoie Amazon.fr et signale clairement Amazon vs vendeur tiers quand l'information vendeur est présente dans la page.
 // @match        https://*.amazon.fr/*
 // @grant        none
@@ -66,6 +66,17 @@
     '.a-size-small.a-color-secondary'
   ].join(',');
 
+  const productPageSelector = [
+    '#desktop_buybox',
+    '#buybox',
+    '#rightCol',
+    '#centerCol',
+    '#buyNow',
+    '#addToCart',
+    '[id*="buybox" i]',
+    '[class*="buybox" i]'
+  ].join(',');
+
   const badgeClass = 'web-augmente-seller-badge';
 
   function matchesOrDescendants(root, selector) {
@@ -80,9 +91,7 @@
 
     for (const marker of matchesOrDescendants(root, sponsoredMarkerSelectors)) {
       const container = marker.closest(sponsoredContainerSelector);
-      if (container) {
-        container.remove();
-      }
+      if (container) container.remove();
     }
   }
 
@@ -94,15 +103,16 @@
     const value = normalizeText(text);
     if (!value) return null;
 
-    const soldByMatch = value.match(/(?:vendu(?:e)?\s+par|sold\s+by)\s*:?\s*([^|•·,;]+)/i);
-    if (soldByMatch) {
-      const seller = normalizeText(soldByMatch[1]);
-      if (seller) {
-        return {
-          seller,
-          isAmazon: /\bamazon\b/i.test(seller)
-        };
-      }
+    const explicitSeller = value.match(/(?:vendu(?:e)?\s+par|sold\s+by)\s*:?\s*([^|•·,;]+)/i);
+    if (explicitSeller) {
+      const seller = normalizeText(explicitSeller[1]);
+      if (seller) return { seller, isAmazon: /\bamazon\b/i.test(seller) };
+    }
+
+    const mobileCombined = value.match(/(?:expéditeur\s*\/\s*vendeur|expediteur\s*\/\s*vendeur|shipper\s*\/\s*seller)\s*:?\s*([^|•·,;]+)/i);
+    if (mobileCombined) {
+      const seller = normalizeText(mobileCombined[1]);
+      if (seller) return { seller, isAmazon: /\bamazon\b/i.test(seller) };
     }
 
     if (/expédié(?:e)?\s+et\s+vendu(?:e)?\s+par\s+amazon|ships?\s+from\s+and\s+sold\s+by\s+amazon/i.test(value)) {
@@ -120,15 +130,14 @@
       if (parsed) return { ...parsed, anchor: candidate };
     }
 
+    const parsedContainer = parseSellerText(container.textContent);
+    if (parsedContainer) return { ...parsedContainer, anchor: container };
+
     const sellerLink = container.querySelector('#sellerProfileTriggerId, a[href*="seller="]');
     if (sellerLink) {
       const seller = normalizeText(sellerLink.textContent);
       if (seller) {
-        return {
-          seller,
-          isAmazon: /\bamazon\b/i.test(seller),
-          anchor: sellerLink
-        };
+        return { seller, isAmazon: /\bamazon\b/i.test(seller), anchor: sellerLink };
       }
     }
 
@@ -151,8 +160,8 @@
 
     badge.style.cssText = [
       'display:inline-block',
-      'margin:4px 0',
-      'padding:3px 7px',
+      'margin:6px 0',
+      'padding:4px 8px',
       'border:1px solid currentColor',
       'border-radius:999px',
       'font-size:12px',
@@ -163,24 +172,16 @@
     ].join(';');
 
     const anchor = sellerInfo.anchor;
-    if (anchor?.parentElement) {
+    if (anchor && anchor !== container && anchor.parentElement) {
       anchor.insertAdjacentElement('afterend', badge);
     } else {
-      container.prepend(badge);
+      container.insertAdjacentElement('afterbegin', badge);
     }
   }
 
   function enhanceSellerInfo(root) {
-    const productPageContainers = [
-      document.querySelector('#desktop_buybox'),
-      document.querySelector('#buybox'),
-      document.querySelector('#rightCol'),
-      document.querySelector('#centerCol')
-    ].filter(Boolean);
-
-    for (const container of productPageContainers) {
-      addSellerBadge(container);
-    }
+    const productContainers = matchesOrDescendants(document, productPageSelector);
+    for (const container of productContainers) addSellerBadge(container);
 
     for (const result of matchesOrDescendants(root, searchResultSelector)) {
       addSellerBadge(result);
