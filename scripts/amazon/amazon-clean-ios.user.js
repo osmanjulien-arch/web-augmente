@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Web Augmenté — Amazon Clean iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.2.1
-// @description  Nettoie Amazon.fr et signale clairement Amazon vs vendeur tiers quand l'information vendeur est présente dans la page.
+// @version      0.2.2
+// @description  Nettoie Amazon.fr et signale clairement Amazon vs vendeur tiers.
 // @match        https://*.amazon.fr/*
 // @grant        none
 // @run-at       document-start
@@ -66,32 +66,18 @@
     '.a-size-small.a-color-secondary'
   ].join(',');
 
-  const productPageSelector = [
-    '#desktop_buybox',
-    '#buybox',
-    '#rightCol',
-    '#centerCol',
-    '#buyNow',
-    '#addToCart',
-    '[id*="buybox" i]',
-    '[class*="buybox" i]'
-  ].join(',');
-
+  const productPageSelector = '#desktop_buybox, #buybox, #rightCol, #centerCol, #buyNow, #addToCart, [id*="buybox" i], [class*="buybox" i]';
   const badgeClass = 'web-augmente-seller-badge';
 
   function matchesOrDescendants(root, selector) {
-    const matches = root instanceof Element && root.matches(selector) ? [root] : [];
-    return matches.concat(Array.from(root.querySelectorAll?.(selector) ?? []));
+    const items = root instanceof Element && root.matches(selector) ? [root] : [];
+    return items.concat(Array.from(root.querySelectorAll?.(selector) ?? []));
   }
 
   function clean(root) {
-    for (const element of matchesOrDescendants(root, removableSelectors)) {
-      element.remove();
-    }
-
+    for (const element of matchesOrDescendants(root, removableSelectors)) element.remove();
     for (const marker of matchesOrDescendants(root, sponsoredMarkerSelectors)) {
-      const container = marker.closest(sponsoredContainerSelector);
-      if (container) container.remove();
+      marker.closest(sponsoredContainerSelector)?.remove();
     }
   }
 
@@ -103,89 +89,59 @@
     const value = normalizeText(text);
     if (!value) return null;
 
-    const explicitSeller = value.match(/(?:vendu(?:e)?\s+par|sold\s+by)\s*:?\s*([^|•·,;]+)/i);
-    if (explicitSeller) {
-      const seller = normalizeText(explicitSeller[1]);
+    const explicit = value.match(/(?:vendu(?:e)?\s+par|sold\s+by)\s*:?\s*([^|•·,;]+)/i);
+    if (explicit) {
+      const seller = normalizeText(explicit[1]);
       if (seller) return { seller, isAmazon: /\bamazon\b/i.test(seller) };
     }
 
-    const mobileCombined = value.match(/(?:expéditeur\s*\/\s*vendeur|expediteur\s*\/\s*vendeur|shipper\s*\/\s*seller)\s*:?\s*([^|•·,;]+)/i);
-    if (mobileCombined) {
-      const seller = normalizeText(mobileCombined[1]);
+    const combined = value.match(/(?:expéditeur\s*\/\s*vendeur|expediteur\s*\/\s*vendeur)\s*:?\s*([^|•·,;]+)/i);
+    if (combined) {
+      const seller = normalizeText(combined[1]);
       if (seller) return { seller, isAmazon: /\bamazon\b/i.test(seller) };
-    }
-
-    if (/expédié(?:e)?\s+et\s+vendu(?:e)?\s+par\s+amazon|ships?\s+from\s+and\s+sold\s+by\s+amazon/i.test(value)) {
-      return { seller: 'Amazon', isAmazon: true };
     }
 
     return null;
   }
 
   function detectSeller(container) {
-    const candidates = Array.from(container.querySelectorAll(sellerCandidateSelector));
-
-    for (const candidate of candidates) {
+    for (const candidate of container.querySelectorAll(sellerCandidateSelector)) {
       const parsed = parseSellerText(candidate.textContent);
       if (parsed) return { ...parsed, anchor: candidate };
     }
-
-    const parsedContainer = parseSellerText(container.textContent);
-    if (parsedContainer) return { ...parsedContainer, anchor: container };
-
-    const sellerLink = container.querySelector('#sellerProfileTriggerId, a[href*="seller="]');
-    if (sellerLink) {
-      const seller = normalizeText(sellerLink.textContent);
-      if (seller) {
-        return { seller, isAmazon: /\bamazon\b/i.test(seller), anchor: sellerLink };
-      }
-    }
-
-    return null;
+    const parsed = parseSellerText(container.textContent);
+    return parsed ? { ...parsed, anchor: container } : null;
   }
 
-  function addSellerBadge(container) {
-    if (!(container instanceof Element)) return;
-    if (container.querySelector(`.${badgeClass}`)) return;
+  function addSellerBadge(container, productPage = false) {
+    if (!(container instanceof Element)) return false;
+    if (productPage && document.querySelector(`.${badgeClass}[data-product-page="1"]`)) return false;
+    if (!productPage && container.querySelector(`.${badgeClass}`)) return false;
 
     const sellerInfo = detectSeller(container);
-    if (!sellerInfo) return;
+    if (!sellerInfo) return false;
 
     const badge = document.createElement('span');
     badge.className = badgeClass;
-    badge.dataset.sellerType = sellerInfo.isAmazon ? 'amazon' : 'third-party';
-    badge.textContent = sellerInfo.isAmazon
-      ? 'Vendu par Amazon'
-      : `Vendeur tiers : ${sellerInfo.seller}`;
-
-    badge.style.cssText = [
-      'display:inline-block',
-      'margin:6px 0',
-      'padding:4px 8px',
-      'border:1px solid currentColor',
-      'border-radius:999px',
-      'font-size:12px',
-      'font-weight:700',
-      'line-height:1.25',
-      'background:#fff',
-      sellerInfo.isAmazon ? 'color:#067d62' : 'color:#8a4b00'
-    ].join(';');
+    if (productPage) badge.dataset.productPage = '1';
+    badge.textContent = sellerInfo.isAmazon ? 'Vendu par Amazon' : `Vendeur tiers : ${sellerInfo.seller}`;
+    badge.style.cssText = `display:inline-block;margin:6px 0;padding:4px 8px;border:1px solid currentColor;border-radius:999px;font-size:12px;font-weight:700;line-height:1.25;background:#fff;color:${sellerInfo.isAmazon ? '#067d62' : '#8a4b00'}`;
 
     const anchor = sellerInfo.anchor;
-    if (anchor && anchor !== container && anchor.parentElement) {
-      anchor.insertAdjacentElement('afterend', badge);
-    } else {
-      container.insertAdjacentElement('afterbegin', badge);
-    }
+    if (anchor && anchor !== container && anchor.parentElement) anchor.insertAdjacentElement('afterend', badge);
+    else container.insertAdjacentElement('afterbegin', badge);
+    return true;
   }
 
   function enhanceSellerInfo(root) {
-    const productContainers = matchesOrDescendants(document, productPageSelector);
-    for (const container of productContainers) addSellerBadge(container);
-
-    for (const result of matchesOrDescendants(root, searchResultSelector)) {
-      addSellerBadge(result);
+    if (/\/dp\//i.test(location.pathname)) {
+      for (const container of matchesOrDescendants(document, productPageSelector)) {
+        if (addSellerBadge(container, true)) break;
+      }
+      return;
     }
+
+    for (const result of matchesOrDescendants(root, searchResultSelector)) addSellerBadge(result, false);
   }
 
   function process(root) {
@@ -195,23 +151,16 @@
 
   function start() {
     process(document);
-
     new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
-          if (node instanceof Element) {
-            process(node);
-          } else if (node.parentElement) {
-            process(node.parentElement);
-          }
+          if (node instanceof Element) process(node);
+          else if (node.parentElement) process(node.parentElement);
         }
       }
     }).observe(document.documentElement, { childList: true, subtree: true });
   }
 
-  if (document.documentElement) {
-    start();
-  } else {
-    document.addEventListener('DOMContentLoaded', start, { once: true });
-  }
+  if (document.documentElement) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
