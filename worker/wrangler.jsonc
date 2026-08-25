@@ -3,11 +3,16 @@
   "name": "web-augmente-api",
   "main": "src/index.js",
   "compatibility_date": "2026-08-25",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": true,
   "kv_namespaces": [
     {
-      "binding": "WA_MEMORY"
+      "binding": "WA_MEMORY",
+      "id": "8bcd6fdde5784849850b5fbceab675f8"
+    },
+    {
+      "binding": "OAUTH_KV",
+      "id": "4c0896a44fdf4306b3afb4ef771ecfa0"
     }
   ],
   "secrets": {

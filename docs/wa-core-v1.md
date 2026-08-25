@@ -6,7 +6,7 @@ La première tranche valide uniquement la boucle :
 
 `Safari → WA Core → endpoint HTTP → mémoire KV → statut Safari`.
 
-Elle ne fusionne aucun autre userscript, ne contient ni IA, ni MCP, ni Google Drive, ni base vectorielle. Le code de cette tranche est original ; aucun code tiers n'a été copié.
+Elle ne fusionne aucun autre userscript, ne contient ni IA, ni Google Drive, ni base vectorielle. Le Worker ajoute désormais une façade MCP OAuth strictement read-only au-dessus de la même mémoire KV, sans modifier le contrat iPhone. Le code de cette tranche est original ; aucun code tiers n'a été copié.
 
 ## Fonctions du userscript
 
@@ -90,7 +90,7 @@ La réponse contient un ID SHA-256 stable dérivé de l'URL canonique normalisé
 }
 ```
 
-Cette action renvoie la dernière capture avec son texte. Elle constitue le futur point d'entrée de l'outil MCP `get_last_page`.
+Cette action renvoie la dernière capture avec son texte. La même clé alimente l’outil MCP read-only `wa_get_last_page` sans passer par l’API bearer du userscript.
 
 ## Fiche mémoire
 
@@ -124,7 +124,6 @@ KV est adapté à cette V1 personnelle et peu concurrente. Les écritures peuven
 ## Étapes volontairement différées
 
 1. fiche Markdown dans Google Drive ;
-2. façade MCP des mêmes actions ;
-3. `get_context` et comparaison explicite de versions ;
-4. fusion progressive des modules userscripts ;
-5. routeur IA gratuit.
+2. `get_context` et comparaison explicite de versions ;
+3. fusion progressive des modules userscripts ;
+4. routeur IA gratuit.

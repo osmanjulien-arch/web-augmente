@@ -9,9 +9,9 @@ V1 — CLEAN + boucle Web Augmenté minimale
 Premier test :
 Safari iPhone + Userscripts + Amazon.fr.
 
-La branche `feature/wa-core-v1` ajoute une boucle volontaire et légère :
+La branche `feature/wa-core-v1` ajoute une boucle volontaire et légère, désormais lisible par un MCP OAuth en lecture seule :
 
-`Safari → WA Core iOS → /api/wa → Cloudflare KV → retour Safari`.
+`Safari → WA Core iOS → /api/wa → Cloudflare KV → /mcp → ChatGPT`.
 
 ## Installation Amazon iOS
 
@@ -37,7 +37,7 @@ Le script n'envoie rien automatiquement. Il transmet uniquement du texte après 
 ## Documentation V1
 
 - [Périmètre, API et protocole de test iPhone](docs/wa-core-v1.md)
-- [Déploiement du Worker Cloudflare](worker/README.md)
+- [Déploiement du Worker Cloudflare et connexion MCP](worker/README.md)
 
 ## Principe
 
