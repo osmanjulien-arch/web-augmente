@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "project": "Web Augmente",
+  "policy": "No third-party code is vendored or enabled before license, permissions and platform compatibility review.",
+  "candidates": [
+    {"id":"amazon-clean-ios","name":"Web Augmente — Amazon Clean iOS","category":"clean","scope":["amazon.fr"],"source":"internal","status":"active","ios_safari":"tested","integration":"native"},
+    {"id":"amazon-sponsored-remover","name":"Amazon Sponsored Products Remover","category":"clean","scope":["amazon"],"source":"Greasy Fork","status":"audit","ios_safari":"candidate","integration":"adapt"},
+    {"id":"amazon-enhancement","name":"Amazon Enhancement","category":"clean","scope":["amazon"],"source":"Greasy Fork","status":"audit","ios_safari":"needs-gm-removal","integration":"extract-features"},
+    {"id":"amazon-dark-pattern-blocker","name":"Amazon Dark Pattern Blocker","category":"clean","scope":["amazon"],"source":"Greasy Fork","status":"audit","ios_safari":"candidate","integration":"extract-features"},
+    {"id":"soldby-amazon","name":"SoldBy — Reveal Sellers on Amazon","category":"intelligence","scope":["amazon"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"compare-with-native"},
+    {"id":"search-engine-assistant","name":"Search Engine Assistant","category":"search","scope":["search-engines"],"source":"Greasy Fork","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"google-direct-links","name":"Google Search Direct Links","category":"search","scope":["google"],"source":"userscript-catalog","status":"audit","ios_safari":"candidate","integration":"adapt"},
+    {"id":"dont-track-me-google","name":"Don't Track Me Google","category":"search","scope":["google"],"source":"GitHub/userscript-catalog","status":"audit","ios_safari":"candidate","integration":"adapt"},
+    {"id":"pagetual","name":"Pagetual","category":"navigate","scope":["multi-site"],"source":"Greasy Fork/GitHub","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"autopager","name":"AutoPager","category":"navigate","scope":["multi-site"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"benchmark"},
+    {"id":"picviewer-ce-plus","name":"Picviewer CE+","category":"media","scope":["multi-site"],"source":"Greasy Fork/GitHub","status":"audit","ios_safari":"unlikely-desktop-ui","integration":"reference"},
+    {"id":"selection-copy-restorer","name":"Selection and Copying Restorer","category":"navigate","scope":["multi-site"],"source":"userscript-catalog","status":"audit","ios_safari":"candidate","integration":"adapt"},
+    {"id":"absolute-enable-right-click-copy","name":"Absolute Enable Right Click & Copy","category":"navigate","scope":["multi-site"],"source":"userscript-catalog","status":"audit","ios_safari":"candidate","integration":"fallback-only"},
+    {"id":"rss-plus","name":"RSS+ — Show Site All RSS","category":"extract","scope":["multi-site"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"adapt"},
+    {"id":"magic-userscript-plus","name":"Magic Userscript+","category":"discover","scope":["multi-site"],"source":"Greasy Fork","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"youtube-alchemy","name":"YouTube Alchemy","category":"media","scope":["youtube"],"source":"Greasy Fork/GitHub","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"sponsorblock-seekbar-only","name":"SponsorBlock Seek Bar Only","category":"media","scope":["youtube"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"optional"},
+    {"id":"instagram-ig-helper","name":"Instagram IG Helper","category":"media","scope":["instagram"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"x-media-tools","name":"X/Twitter Media Copy & Download","category":"media","scope":["x.com"],"source":"userscript-catalog","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"sourcecapsule","name":"SourceCapsule","category":"extract","scope":["x.com"],"source":"Greasy Fork","status":"audit","ios_safari":"unknown","integration":"reference"},
+    {"id":"reddit-login-popup-remover","name":"Reddit Login Popup Remover","category":"clean","scope":["reddit"],"source":"userscript-catalog","status":"audit","ios_safari":"candidate","integration":"adapt"}
+  ]
+}
