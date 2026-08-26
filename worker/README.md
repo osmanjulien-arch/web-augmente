@@ -64,6 +64,35 @@ L’écran `/authorize` demande le secret personnel par formulaire HTTPS POST. L
 
 ## Ajouter le MCP dans ChatGPT
 
+### Diagnostic d’un refus OAuth
+
+Les erreurs de session affichent un **code diagnostic** et une **référence**
+aléatoire, partageables sans transmettre le secret. Le même code est disponible
+dans `X-WA-OAuth-Error` et dans le log structuré `wa_oauth_diagnostic`.
+Le header `X-WA-OAuth-Diagnostics: 1` sur les réponses HTML OAuth permet de
+confirmer que cette version du diagnostic est déployée.
+
+| Code | Observation |
+| --- | --- |
+| `FORM_INVALID` | Formulaire illisible ou type de contenu incorrect. |
+| `STATE_FIELD_MISSING` / `CSRF_FIELD_MISSING` | Champ masqué absent du formulaire reçu. |
+| `STATE_COOKIE_MISSING` / `CSRF_COOKIE_MISSING` | Cookie correspondant absent de la requête reçue. |
+| `STATE_COOKIE_MISMATCH` / `CSRF_COOKIE_MISMATCH` | Cookie reçu différent du champ du formulaire ; vérifier notamment les ouvertures concurrentes. |
+| `STATE_UNAVAILABLE` | KV ne retourne aucun état. Ne permet pas de distinguer expiration, consommation ou délai de visibilité KV. |
+| `STATE_INVALID` | État retrouvé incomplet ou invalide. |
+| `STATE_EXPIRED` | État encore présent mais sa date d’expiration est dépassée. |
+| `CSRF_STATE_MISMATCH` | Protection du formulaire différente de celle enregistrée. |
+| `STORAGE_READ_FAILED` / `STORAGE_DELETE_FAILED` | Échec d’accès au stockage de session (HTTP 503). |
+
+Le diagnostic ne journalise que le code, sa version et un identifiant aléatoire
+indépendant. Aucune valeur de formulaire, token, cookie, empreinte, URL, donnée
+de page ou erreur brute n’est ajoutée aux logs. Il ne modifie ni les critères
+d’autorisation, ni les cookies, ni la durée de session, ni les bindings.
+L’état reste consommé à la première soumission selon le comportement existant :
+après un refus, relancer la connexion depuis ChatGPT plutôt que renvoyer le POST.
+
+### Connexion
+
 D’après la [documentation officielle OpenAI](https://developers.openai.com/plugins/deploy/connect-chatgpt) :
 
 1. Dans ChatGPT, ouvrir **Settings** → **Security and login**, puis activer **Developer mode**.

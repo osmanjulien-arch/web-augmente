@@ -3,6 +3,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { test, vi } from 'vitest';
 import worker, {
   OAUTH_SCOPE,
+  OAUTH_STATE_PREFIX,
   OAUTH_STATE_TTL_SECONDS,
   UNTRUSTED_CONTENT_WARNING,
   createWebAugmenteMcpServer,
@@ -432,6 +433,110 @@ test('OAuth state expires after ten minutes and a consumed state cannot be reuse
   const replay = await handleAuthorize(authorizationPost(oneTimeStart, TOKEN), oneTime.testEnv);
   assert.equal(replay.status, 400);
   assert.equal(oneTime.completed.length, 1);
+});
+
+const diagnosticCases = [
+  ['STATE_FIELD_MISSING', (_env, start) => { start.stateToken = ''; }],
+  ['CSRF_FIELD_MISSING', (_env, start) => { start.csrfToken = ''; }],
+  ['STATE_COOKIE_MISSING', (_env, start) => {
+    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-STATE=')).join('; ');
+  }],
+  ['CSRF_COOKIE_MISSING', (_env, start) => {
+    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-CSRF=')).join('; ');
+  }],
+  ['STATE_COOKIE_MISMATCH', (_env, start) => {
+    start.cookies = start.cookies.replace(start.stateToken, 'different-session-cookie');
+  }],
+  ['CSRF_COOKIE_MISMATCH', (_env, start) => {
+    start.cookies = start.cookies.replace(start.csrfToken, 'different-csrf-cookie');
+  }],
+  ['STATE_UNAVAILABLE', async (testEnv, start) => {
+    await testEnv.OAUTH_KV.delete(`${OAUTH_STATE_PREFIX}${start.stateToken}`);
+  }],
+  ['STATE_INVALID', async (testEnv, start) => {
+    const key = `${OAUTH_STATE_PREFIX}${start.stateToken}`;
+    const pending = await testEnv.OAUTH_KV.get(key, 'json');
+    delete pending.oauthRequest;
+    await testEnv.OAUTH_KV.put(key, JSON.stringify(pending));
+  }],
+  ['STATE_EXPIRED', async (testEnv, start) => {
+    const key = `${OAUTH_STATE_PREFIX}${start.stateToken}`;
+    const pending = await testEnv.OAUTH_KV.get(key, 'json');
+    pending.expiresAt = Date.now() - 1000;
+    await testEnv.OAUTH_KV.put(key, JSON.stringify(pending));
+  }],
+  ['CSRF_STATE_MISMATCH', async (testEnv, start) => {
+    const key = `${OAUTH_STATE_PREFIX}${start.stateToken}`;
+    const pending = await testEnv.OAUTH_KV.get(key, 'json');
+    pending.csrfHash = 'different-server-side-hash';
+    await testEnv.OAUTH_KV.put(key, JSON.stringify(pending));
+  }],
+  ['STORAGE_READ_FAILED', (testEnv) => {
+    testEnv.OAUTH_KV.get = async () => { throw new Error(`private-storage-error:${TOKEN}`); };
+  }, 503],
+  ['STORAGE_DELETE_FAILED', (testEnv) => {
+    testEnv.OAUTH_KV.delete = async () => { throw new Error(`private-storage-error:${TOKEN}`); };
+  }, 503]
+];
+
+for (const [code, prepare, status = 400] of diagnosticCases) {
+  test(`OAuth diagnosis ${code} is precise and contains no secrets`, async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { testEnv, completed } = oauthEnv();
+      const start = await beginTestAuthorization(testEnv);
+      assert.equal(start.response.headers.get('X-WA-OAuth-Diagnostics'), '1');
+      const originalState = start.stateToken;
+      const originalCsrf = start.csrfToken;
+      const originalPending = await testEnv.OAUTH_KV.get(`${OAUTH_STATE_PREFIX}${originalState}`, 'json');
+      const memoryReads = vi.spyOn(testEnv.WA_MEMORY, 'get');
+      const memoryWrites = vi.spyOn(testEnv.WA_MEMORY, 'put');
+      await prepare(testEnv, start);
+      const response = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
+      const body = await response.text();
+      const requestId = response.headers.get('X-WA-Request-Id');
+      assert.equal(response.status, status);
+      assert.equal(response.headers.get('X-WA-OAuth-Error'), code);
+      assert.match(requestId, /^[0-9a-f-]{36}$/);
+      assert.ok(body.includes(`Code diagnostic : ${code}`));
+      assert.ok(body.includes(requestId));
+      assert.equal(response.headers.get('Cache-Control'), 'no-store');
+      assert.equal(completed.length, 0);
+      assert.equal(memoryReads.mock.calls.length, 0);
+      assert.equal(memoryWrites.mock.calls.length, 0);
+      assert.equal(warnSpy.mock.calls.length, 1);
+      assert.deepEqual(JSON.parse(warnSpy.mock.calls[0][0]), {
+        event: 'wa_oauth_diagnostic', version: 1, code, request_id: requestId
+      });
+      const output = body + JSON.stringify(warnSpy.mock.calls) + JSON.stringify([...response.headers]);
+      for (const sensitive of [TOKEN, originalState, originalCsrf, originalPending.csrfHash,
+        originalPending.oauthRequest.state, originalPending.oauthRequest.clientId,
+        originalPending.oauthRequest.redirectUri, 'private-storage-error',
+        'different-session-cookie', 'different-csrf-cookie', 'different-server-side-hash']) {
+        assert.equal(output.includes(sensitive), false, `leaked diagnostic data for ${code}`);
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+}
+
+test('malformed OAuth forms return a safe diagnostic and preserve HTTP status', async () => {
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  try {
+    const { testEnv, completed } = oauthEnv();
+    const response = await handleAuthorize(new Request('https://wa.example/authorize', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ personal_secret: TOKEN })
+    }), testEnv);
+    assert.equal(response.status, 415);
+    assert.equal(response.headers.get('X-WA-OAuth-Error'), 'FORM_INVALID');
+    assert.equal(completed.length, 0);
+    assert.equal((await response.text()).includes(TOKEN), false);
+    assert.equal(JSON.stringify(warnSpy.mock.calls).includes(TOKEN), false);
+  } finally {
+    warnSpy.mockRestore();
+  }
 });
 
 test('wa_get_last_page returns only the last capture and never writes WA_MEMORY', async () => {
