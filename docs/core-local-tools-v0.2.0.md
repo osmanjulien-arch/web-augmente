@@ -40,14 +40,19 @@ Référence d'installation : [documentation officielle Userscripts](https://gith
 Si ces cinq scripts autonomes sont installés, les désactiver (ne pas les supprimer)
 pendant le test : Page Toolbox, Selection & Copy Restorer, RSS Discovery,
 Source Capsule, Page Notes. Ne pas laisser leur ancienne UI/leurs handlers actifs
-en parallèle des modules correspondants. **Conserver Amazon Clean et Google Clean** :
-ils ne sont pas encore absorbés dans le pack Sites.
+en parallèle des modules correspondants. **Sans WA Sites**, conserver Amazon Clean
+et Google Clean. **Avec WA Sites 0.1.0**, les désactiver pendant l’essai, ainsi que
+les autres nettoyeurs repris : voir [la procédure Sites](wa-sites-v0.1.0.md).
 
 Les anciennes notes localStorage restent où elles étaient. Rien n'est supprimé
 ni importé automatiquement depuis un stockage accessible au site. Si nécessaire,
 les recopier manuellement avant de désactiver l'ancien Page Notes.
 
 ## Essai iPhone (critère de promotion)
+
+Retour utilisateur du 26 août : plan de page utilisé sur France Travail, note
+annoncée enregistrée, puis un module masqué. Cela ne valide pas à lui seul tous les
+cas ci-dessous (persistance après rechargement et séparation entre pages notamment).
 
 1. Ouvrir une page publique. Un seul bouton WA ; cinq modules visibles ; aucun token demandé.
 2. Navigation : copier une URL avec `utm_source`, vérifier que ce paramètre disparaît

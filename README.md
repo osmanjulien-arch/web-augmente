@@ -57,7 +57,8 @@ Le token, le nom du script et les clés de connexion restent inchangés.
 - [Installation, remplacement des anciens utilitaires et test iPhone](docs/core-local-tools-v0.2.0.md)
 
 Cette version n'est **pas** la fusion des trois packs terminée ni une validation
-de tous les scripts tiers. Les modules Sites et AI restent à intégrer.
+de tous les scripts tiers. Un premier pack Sites est désormais disponible ci-dessous ;
+le pack AI et les fonctions restantes sont encore à intégrer.
 
 Sources modulaires : `src/core/`. Ne pas éditer directement le bundle généré.
 
@@ -65,6 +66,35 @@ Sources modulaires : `src/core/`. Ne pas éditer directement le bundle généré
 node tools/build-core.cjs
 node tools/build-core.cjs --check
 node --test tests/wa-core-ios.test.cjs tests/local-tools.test.cjs
+```
+
+## WA Sites 0.1.0 — améliorations automatiques (candidat iPhone)
+
+Un deuxième fichier regroupe huit fonctions locales pour Amazon.fr, Google.fr/com,
+YouTube et Reddit. Le bouton **Sites**, en bas à gauche, propose des interrupteurs
+et **Voir l’original — pause**. Le bouton **WA** et la connexion mémoire restent inchangés.
+
+- Amazon : sponsorisés et Rufus masqués, badge vendeur si identifiable ; encarts Prime/carte en option.
+- Google : publicités identifiées masquées et liens directs, sans supprimer les paramètres de destination.
+- YouTube : Shorts masqués dans les listes, sans bloquer un Short ouvert volontairement.
+- Reddit : certaines invitations à ouvrir l’application, pas les vrais formulaires de connexion.
+
+[Installer WA Sites dans Userscripts](https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js)
+— [installation, limites et essai avant/après](docs/wa-sites-v0.1.0.md).
+
+**Garder WA Core actif.** Désactiver les anciens nettoyeurs Amazon/Google/YouTube/Reddit
+correspondants pendant l’essai pour éviter des effets en double. Aucun token à saisir,
+aucun appel réseau, aucun déploiement Cloudflare. Les huit fonctions ne prétendent pas
+reproduire tous les scripts tiers de l’inventaire. La validation Safari réelle reste à faire.
+
+Sources : `src/sites/`, bundle généré : `scripts/sites/wa-sites-ios.user.js`.
+La dépendance LinkeDOM sert uniquement aux tests Node, jamais au userscript distribué.
+
+```sh
+npm ci --ignore-scripts
+npm run build
+npm run check
+npm test
 ```
 
 ## Documentation V1
