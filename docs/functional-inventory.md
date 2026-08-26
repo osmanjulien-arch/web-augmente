@@ -1,6 +1,6 @@
 # Inventaire fonctionnel — Web Augmenté
 
-Audit du code local le 26 août 2026 : Core `0.2.0`, puis premier lot Sites `0.1.0`
+Audit du code local le 26 août 2026 : Core `0.2.0`, puis Sites `0.1.1`
 sur la base `1ca3dbc`.
 Ce registre couvre les **26 références nommées dans le rappel initial**, plus les utilitaires internes.
 Le périmètre n'est pas limité aux cinq modules du premier lot. Aucun original tiers
@@ -10,7 +10,7 @@ n'est importé dans ce lot : les variantes Web Augmenté existantes sont réutil
 
 - **Partiel autonome** : une variante existe dans `scripts/`, mais ne couvre pas tout l'original ; pas encore fusionnée.
 - **Partiel Core** : des fonctions sont fusionnées dans Core 0.2.0, d'autres restent au backlog.
-- **Partiel Sites** : des fonctions sont fusionnées dans Sites 0.1.0, pas nécessairement toute la variante autonome ni l'original tiers.
+- **Partiel Sites** : des fonctions sont fusionnées dans Sites 0.1.1, pas nécessairement toute la variante autonome ni l'original tiers.
 - **À intégrer** : aucune implémentation correspondante suffisante trouvée dans le dépôt.
 - **Test iPhone** : uniquement les essais rapportés par Julien (anciens Amazon/Google, capture Core 0.1.1, usage du plan Core 0.2.0, note annoncée enregistrée et masquage d'un module). Validation complète et nouveaux modules Sites encore attendus.
 - **Licence tiers** : à vérifier sur une version/source précise avant tout import de code. Les noms ci-dessous expriment un besoin fonctionnel, pas une attribution de code ni une compatibilité garantie. Ne pas supposer que réécrire une fonction règle automatiquement les obligations d'une copie dérivée.
@@ -37,7 +37,7 @@ Les chemins ci-dessous sont relatifs à `scripts/`. « Restant » inclut l'audit
 | 14 | RSS+ / Core | Module `feeds` : tous les flux RSS/Atom déclarés, dédoublonnés | Partiel Core | Pas de découverte exhaustive par règles de site ou exploration réseau | 2 flux déclarés → 2 liens, aucun appel avant clic |
 | 15 | Magic Userscript+ / Core | `generic/magic-navigation-ios.user.js` : liens nettoyés ; Toolbox copie une URL sans suivi | Partiel autonome | Découverte de scripts/styles, navigation enrichie non intégrées | Choix d'une fonction par site sans réécriture invasive |
 | 16 | Find Scripts For This Site / Core | Aucun moteur de découverte | À intégrer | Catalogue, recherche par domaine, provenance/risques, pas d'installation automatique | Trouver des candidats sans les présenter comme sûrs ou installés |
-| 17 | YouTube Alchemy / Sites | Module `youtube-shorts` : listes, cartes et rangées identifiées | Partiel Sites | Très loin du périmètre original ; contrôles/modules à inventorier | Vidéo normale conservée, Short ouvert volontairement utilisable |
+| 17 | YouTube Alchemy / Sites | Modules `youtube-shorts` et `youtube-community-posts` | Partiel Sites | Très loin du périmètre original ; autres contrôles/modules à inventorier | Vidéo normale conservée, Short/post ouvert volontairement utilisable |
 | 18 | SponsorBlock Seek Bar Only / Sites | `youtube/sponsorblock-seekbar-ios.user.js` : requête + marques barre | Partiel autonome | Polling permanent, erreurs silencieuses, SPA et compatibilité iOS à revoir | Segments cohérents après changement vidéo ; aucun saut automatique |
 | 19 | Instagram IG Helper / Sites | `social/instagram-media-tools-ios.user.js` : première image d'article | Partiel autonome | Carrousels, vidéos, téléchargement et règles iOS non couverts | Identifier le bon média de la publication courante |
 | 20 | X/Twitter Media Copy & Download / Sites | `social/x-media-tools-ios.user.js` : lien première image twimg | Partiel autonome | Multi-images, vidéo, sauvegarde/copie non couvertes | Image de publication, pas avatar ; limitation vidéo explicite |
@@ -67,7 +67,7 @@ Les chemins ci-dessous sont relatifs à `scripts/`. « Restant » inclut l'audit
 ## Lots et maintien du périmètre
 
 1. **Livré** : Core 0.2.0, cinq modules locaux, UI commune, interrupteurs, tests. Essais iPhone partiels rapportés, validation complète attendue.
-2. **Livré en code candidat** : Sites 0.1.0, huit modules Amazon/Google/YouTube/Reddit avec routeur, interrupteurs persistants et comparaison réversible. Aucun appel réseau, aucun changement de la branche Amazon stable. Essai Safari réel à faire : [procédure et limites](wa-sites-v0.1.0.md).
+2. **Livré en code candidat** : Sites 0.1.1, neuf modules Amazon/Google/YouTube/Reddit avec routeur, interrupteurs persistants et comparaison réversible. Aucun appel réseau, aucun changement de la branche Amazon stable. Essai Safari réel à faire : [procédure et limites](wa-sites-v0.1.0.md).
 3. Navigation/médias/découverte : pagination sûre, galerie, vidéos, RSS enrichi, recherche de scripts. Pas de chargement de code distant arbitraire.
 4. AI : outils de conversation/prompts/export, puis résumé/question avec fournisseur choisi et budget strict. Aucun basculement payant automatique.
 

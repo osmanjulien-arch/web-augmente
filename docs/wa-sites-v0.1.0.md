@@ -1,4 +1,4 @@
-# WA Sites 0.1.0 — moins de bruit pendant la navigation
+# WA Sites 0.1.1 — moins de bruit pendant la navigation
 
 ## Résultat attendu
 
@@ -17,6 +17,7 @@ par **WA Core** ; il ne pilote pas ces réglages Safari.
 | Google.fr/com | Blocs publicitaires identifiés | Oui | Sur `/search` seulement |
 | Google.fr/com | Liens directs | Oui | Redirections `/url` et `/imgres` reconnues ; retrait de `ping`/`data-ved` des liens externes, pas de garantie anti-suivi totale |
 | YouTube | Shorts dans les listes | Oui | Cartes mixtes conservées ; `/shorts/...` volontairement ouvert n’est pas filtré |
+| YouTube | Publications communautaires dans les recommandations | Oui | Un post ou un onglet Communauté ouvert volontairement reste accessible |
 | Reddit | Invitations à ouvrir l’application | Oui | Texte et lien vers l’app requis ; connexion, éditeurs, consentement non ciblé et dialogues natifs ouverts conservés |
 
 Les paramètres des destinations Google, y compris les signatures, ne sont pas
@@ -33,7 +34,7 @@ Il ne remplace donc pas entièrement l’ancien nettoyeur Reddit.
    Amazon Clean, Amazon Dark Patterns, Google Clean, YouTube Clean, Reddit Clean.
    Les conserver pour un retour arrière. Laisser **WA Core** actif.
 4. Autoriser l’extension sur le site testé, puis recharger ce site.
-5. Vérifier le bouton **Sites** en bas à gauche et la version **0.1.0** dans son panneau.
+5. Vérifier le bouton **Sites** en bas à gauche et la version **0.1.1** dans son panneau.
 
 Suivre le parcours d’installation de l’extension ; ne pas supposer qu’iOS fournit
 un éditeur de scripts intégré. Référence : [documentation Userscripts](https://github.com/quoid/userscripts#usage).
@@ -55,12 +56,13 @@ vitesse ni un nombre garanti de publicités bloquées.
 
 Pour Amazon, vérifier aussi que prix, variantes et boutons d’achat restent visibles,
 sans effectuer d’achat. Pour Google, vérifier un lien avec paramètres utiles. Pour
-YouTube, vérifier qu’une vidéo ordinaire et un Short ouvert directement restent accessibles.
+YouTube, vérifier qu’une publication communautaire disparaît de l’accueil, tandis
+qu’une vidéo ordinaire, un Short direct et un onglet Communauté ouvert restent accessibles.
 Pour Reddit, vérifier qu’un vrai formulaire de connexion reste utilisable.
 
 ## Architecture et confidentialité
 
-- Huit modules, un routeur, un observateur DOM temporisé à 150 ms (pas de `setInterval`).
+- Neuf modules, un routeur, un observateur DOM temporisé à 150 ms (pas de `setInterval`).
 - Le traitement est suspendu quand la page est masquée. Les changements de page
   dynamiques déclenchent une nouvelle vérification ; les pages sensibles connues
   sont exclues et les effets précédents y sont annulés.

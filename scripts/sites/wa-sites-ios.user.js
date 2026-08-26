@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Web Augmenté — WA Sites iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.0
-// @description  Nettoyage local réversible Amazon, Google, Reddit et Shorts YouTube. Aucun envoi ni token.
+// @version      0.1.1
+// @description  Nettoyage local réversible Amazon, Google, Reddit, Shorts et publications YouTube. Aucun envoi ni token.
 // @match        https://amazon.fr/*
 // @match        https://*.amazon.fr/*
 // @match        https://google.fr/*
@@ -222,6 +222,24 @@ function youtubeSiteModules() {
           const local = links.filter(url => ['youtube.com','www.youtube.com','m.youtube.com'].includes(url.hostname));
           if (local.some(url => url.pathname.startsWith('/shorts/')) && !local.some(url => url.pathname === '/watch')) ctx.hide(card);
         }
+      } },
+    { id: 'youtube-community-posts', site: 'youtube', label: 'Masquer les publications communautaires', defaultOn: true,
+      run(ctx) {
+        // A community tab or an individual post opened deliberately remains usable.
+        if (/^\/post(?:\/|$)/.test(ctx.location.pathname) || /\/(?:community|posts)(?:\/|$)/.test(ctx.location.pathname)) return;
+        const posts = ctx.all([
+          'ytd-post-renderer', 'ytd-backstage-post-thread-renderer', 'ytd-backstage-post-renderer',
+          'ytm-post-renderer', 'ytm-backstage-post-thread-renderer', 'ytm-backstage-post-renderer',
+          'ytd-rich-section-renderer[is-post]', 'ytm-rich-section-renderer[is-post]'
+        ].join(','));
+        for (const post of posts) {
+          ctx.hide(post.closest('ytd-rich-section-renderer,ytm-rich-section-renderer,ytd-rich-item-renderer,ytm-rich-item-renderer') || post);
+        }
+        // Fallback for new YouTube renderers: /post/ is specific to community posts.
+        for (const link of ctx.all('a[href^="/post/"]')) {
+          const card = link.closest('ytd-rich-section-renderer,ytm-rich-section-renderer,ytd-rich-item-renderer,ytm-rich-item-renderer,ytd-post-renderer,ytm-post-renderer');
+          if (card) ctx.hide(card);
+        }
       } }
   ];
 }
@@ -277,7 +295,7 @@ function startSitesApp(GM) {
     .action{display:block;width:100%;padding:12px;border:1px solid #0f766e;border-radius:10px;background:#f0fdfa;color:#134e4a;margin:10px 0;min-height:44px}
     .status{font-size:13px;color:#475569}
   </style><section class="panel" hidden aria-label="Réglages WA Sites">
-    <header><h2>WA Sites · 0.1.0</h2><button class="close" aria-label="Fermer">×</button></header>
+    <header><h2>WA Sites · 0.1.1</h2><button class="close" aria-label="Fermer">×</button></header>
     <p class="site"></p><div class="modules"></div>
     <button class="action compare">Voir l’original — pause</button>
     <button class="action temporary" hidden>Activer pour cette page seulement</button>

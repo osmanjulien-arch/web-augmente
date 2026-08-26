@@ -68,15 +68,15 @@ node tools/build-core.cjs --check
 node --test tests/wa-core-ios.test.cjs tests/local-tools.test.cjs
 ```
 
-## WA Sites 0.1.0 — améliorations automatiques (candidat iPhone)
+## WA Sites 0.1.1 — améliorations automatiques (candidat iPhone)
 
-Un deuxième fichier regroupe huit fonctions locales pour Amazon.fr, Google.fr/com,
+Un deuxième fichier regroupe neuf fonctions locales pour Amazon.fr, Google.fr/com,
 YouTube et Reddit. Le bouton **Sites**, en bas à gauche, propose des interrupteurs
 et **Voir l’original — pause**. Le bouton **WA** et la connexion mémoire restent inchangés.
 
 - Amazon : sponsorisés et Rufus masqués, badge vendeur si identifiable ; encarts Prime/carte en option.
 - Google : publicités identifiées masquées et liens directs, sans supprimer les paramètres de destination.
-- YouTube : Shorts masqués dans les listes, sans bloquer un Short ouvert volontairement.
+- YouTube : Shorts et publications communautaires masqués dans les listes, sans bloquer un contenu ouvert volontairement.
 - Reddit : certaines invitations à ouvrir l’application, pas les vrais formulaires de connexion.
 
 [Installer WA Sites dans Userscripts](https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js)
@@ -84,7 +84,7 @@ et **Voir l’original — pause**. Le bouton **WA** et la connexion mémoire re
 
 **Garder WA Core actif.** Désactiver les anciens nettoyeurs Amazon/Google/YouTube/Reddit
 correspondants pendant l’essai pour éviter des effets en double. Aucun token à saisir,
-aucun appel réseau, aucun déploiement Cloudflare. Les huit fonctions ne prétendent pas
+aucun appel réseau, aucun déploiement Cloudflare. Les neuf fonctions ne prétendent pas
 reproduire tous les scripts tiers de l’inventaire. La validation Safari réelle reste à faire.
 
 Sources : `src/sites/`, bundle généré : `scripts/sites/wa-sites-ios.user.js`.

@@ -23,7 +23,7 @@ function startSitesApp(GM) {
     .action{display:block;width:100%;padding:12px;border:1px solid #0f766e;border-radius:10px;background:#f0fdfa;color:#134e4a;margin:10px 0;min-height:44px}
     .status{font-size:13px;color:#475569}
   </style><section class="panel" hidden aria-label="Réglages WA Sites">
-    <header><h2>WA Sites · 0.1.0</h2><button class="close" aria-label="Fermer">×</button></header>
+    <header><h2>WA Sites · 0.1.1</h2><button class="close" aria-label="Fermer">×</button></header>
     <p class="site"></p><div class="modules"></div>
     <button class="action compare">Voir l’original — pause</button>
     <button class="action temporary" hidden>Activer pour cette page seulement</button>

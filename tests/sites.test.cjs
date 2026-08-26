@@ -143,6 +143,24 @@ test('YouTube : Short ouvert volontairement non modifié', () => {
   f.run('youtube-shorts'); assert.ok(!hidden(f.q('#shelf')));
 });
 
+test('YouTube : publications communautaires masquées, section ordinaire conservée', () => {
+  const f = fixture('<ytm-rich-section-renderer id="community"><ytm-backstage-post-renderer>Publication</ytm-backstage-post-renderer></ytm-rich-section-renderer><ytd-rich-section-renderer id="desktop"><ytd-post-renderer>Post</ytd-post-renderer></ytd-rich-section-renderer><ytm-rich-section-renderer id="ordinary"><a href="/watch?v=abc">Vidéo</a></ytm-rich-section-renderer>', 'https://m.youtube.com/');
+  f.run('youtube-community-posts');
+  assert.ok(hidden(f.q('#community'))); assert.ok(hidden(f.q('#desktop'))); assert.ok(!hidden(f.q('#ordinary')));
+});
+
+test('YouTube : nouveau renderer détecté par son lien de publication', () => {
+  const f = fixture('<ytm-rich-item-renderer id="post"><unknown-renderer><a href="/post/Ugkx123">Publication</a></unknown-renderer></ytm-rich-item-renderer><ytm-rich-item-renderer id="video"><a href="/watch?v=abc">Vidéo</a></ytm-rich-item-renderer>', 'https://m.youtube.com/');
+  f.run('youtube-community-posts'); assert.ok(hidden(f.q('#post'))); assert.ok(!hidden(f.q('#video')));
+});
+
+test('YouTube : post et onglet Communauté ouverts volontairement conservés', () => {
+  for (const url of ['https://m.youtube.com/post/Ugkx123', 'https://www.youtube.com/@channel/community']) {
+    const f = fixture('<ytm-post-renderer id="post">Publication</ytm-post-renderer>', url);
+    f.run('youtube-community-posts'); assert.ok(!hidden(f.q('#post')), url);
+  }
+});
+
 test('Reddit : invitation app ciblée, texte de publication et connexion conservés', () => {
   const f = fixture('<div id="app" role="dialog">Open in app<a href="https://reddit.app.link/test">Open</a></div><div id="login" role="dialog">Open in app<form><input type="password"></form><a href="reddit://test">Open</a></div><article id="post">Open in app<a href="reddit://test">Test</a></article><div id="other" role="dialog">Cookie consent<a href="https://apps.apple.com/test">app</a></div>', 'https://www.reddit.com/r/test');
   f.run('reddit-app-prompts'); assert.ok(hidden(f.q('#app')));
