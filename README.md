@@ -41,7 +41,31 @@ pas de token. Après remplacement, ouvrir le panneau Userscripts puis recharger
 la page ; le menu WA affiche la version. Cette mise à jour du userscript ne
 nécessite pas de redéployer le Worker.
 
-Tests du userscript depuis la racine : `node --test tests/wa-core-ios.test.cjs`.
+### Core 0.2.0 — premier lot de fonctions locales (candidat iPhone)
+
+Le même bouton WA regroupe désormais cinq modules : navigation/liens/plan,
+restauration volontaire sélection-copie, flux RSS/Atom, fiche source et notes
+locales privées. Le panneau donne priorité à ces outils ; les boutons d'envoi
+existants se trouvent dans **Envoyer vers ma mémoire Web Augmenté**.
+
+Chaque module peut être affiché/masqué, réglage conservé via GM. Aucun scan
+permanent ni envoi réseau pour ces outils. Le déblocage de copie ne s'active
+qu'au clic et peut être annulé. Les notes restent dans Userscripts, pas dans le MCP.
+Le token, le nom du script et les clés de connexion restent inchangés.
+
+- [Inventaire complet : 26 références, fonctions présentes et manquantes](docs/functional-inventory.md)
+- [Installation, remplacement des anciens utilitaires et test iPhone](docs/core-local-tools-v0.2.0.md)
+
+Cette version n'est **pas** la fusion des trois packs terminée ni une validation
+de tous les scripts tiers. Les modules Sites et AI restent à intégrer.
+
+Sources modulaires : `src/core/`. Ne pas éditer directement le bundle généré.
+
+```sh
+node tools/build-core.cjs
+node tools/build-core.cjs --check
+node --test tests/wa-core-ios.test.cjs tests/local-tools.test.cjs
+```
 
 ## Documentation V1
 

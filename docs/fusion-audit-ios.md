@@ -1,5 +1,10 @@
 # Audit fusion — Web Augmenté Safari iOS
 
+État de réalisation : [inventaire fonctionnel](functional-inventory.md).
+Core 0.2.0 fusionne cinq modules locaux ; les packs Sites/AI ne sont pas encore
+construits. La capture/token de Core 0.1.1 est validée par l'utilisateur, pas les
+nouveaux modules de 0.2.0.
+
 ## Décision
 
 La meilleure cible n’est pas un seul userscript monolithique mais **3 packs** installables dans Userscripts sur Safari iPhone :

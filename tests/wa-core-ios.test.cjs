@@ -87,7 +87,7 @@ function harness({ store = new Map(), hostname = 'amazon.fr', answers = [], miss
 test('metadata keeps script identity, grants, content isolation and version', () => {
   assert.match(source, /@name\s+Web Augmenté — WA Core iOS/);
   assert.match(source, /@namespace\s+https:\/\/github.com\/osmanjulien-arch\/web-augmente/);
-  assert.match(source, /@version\s+0\.1\.1/);
+  assert.match(source, /@version\s+0\.2\.0/);
   assert.match(source, /@inject-into\s+content/);
   for (const method of ['getValue', 'setValue', 'xmlHttpRequest']) {
     assert.ok(source.includes(`// @grant        GM.${method}`));
@@ -128,7 +128,7 @@ test('one configuration persists through reload and across sites using the same 
     const body = JSON.parse(request.data);
     assert.equal(body.action, 'remember_page');
     assert.equal(body.page.domain, hostname);
-    assert.equal(body.page.client_version, '0.1.1');
+    assert.equal(body.page.client_version, '0.2.0');
     assert.equal(body.page.content, 'Sélection de test volontaire.');
     assert.equal(next.status().className, 'success');
     assert.equal(next.calls.fallback, 0);

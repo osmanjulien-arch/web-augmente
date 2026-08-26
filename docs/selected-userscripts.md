@@ -2,6 +2,12 @@
 
 Cette branche regroupe la présélection issue de l’audit Greasy Fork / OpenUserJS / GitHub-Gists / ScriptCat.
 
+**État vérifié du code au 26 août 2026 :** consulter
+[l'inventaire fonctionnel](functional-inventory.md), qui complète cette liste
+historique avec Find Scripts, UTags et les trois références IA du rappel initial.
+Il distingue variante partielle, fonction fusionnée et test réel iPhone.
+Les descriptions historiques ci-dessous ne valent pas validation fonctionnelle complète.
+
 ## Périmètre verrouillé
 
 L’objectif est d’intégrer **toute la présélection**, pas uniquement les premiers scripts de la roadmap. Aucun script de cette liste ne doit être oublié.
