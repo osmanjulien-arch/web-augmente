@@ -27,12 +27,21 @@ La branche stable `release/amazon-clean-ios-v0.2.3` reste indépendante et ne do
 
 1. Déployer l'endpoint décrit dans [`worker/README.md`](worker/README.md).
 2. Ouvrir dans Safari l'[URL RAW de WA Core iOS](https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/core/wa-core-ios.user.js).
-3. Installer le fichier avec Userscripts.
+3. Installer le fichier avec Userscripts ; pour une mise à jour, remplacer le WA Core existant sans changer son nom de fichier ni créer de doublon.
 4. Sur une page Web, toucher le bouton `WA`.
 5. Choisir `Configurer la connexion`, puis saisir l'URL `/api/wa` et le token personnel.
 6. Tester `Envoyer cette page`, puis envoyer une seconde fois : le serveur doit répondre `new`, puis `already_seen`.
 
 Le script n'envoie rien automatiquement. Il transmet uniquement du texte après une action explicite.
+
+**WA Core 0.1.1** corrige l’accès aux API de l’extension Safari : configuration
+partagée entre sites dans Userscripts, envoi par `GM.xmlHttpRequest`, aucun repli
+vers le stockage ou le réseau de la page. Le test de connexion public ne demande
+pas de token. Après remplacement, ouvrir le panneau Userscripts puis recharger
+la page ; le menu WA affiche la version. Cette mise à jour du userscript ne
+nécessite pas de redéployer le Worker.
+
+Tests du userscript depuis la racine : `node --test tests/wa-core-ios.test.cjs`.
 
 ## Documentation V1
 

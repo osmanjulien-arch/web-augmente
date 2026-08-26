@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Augmenté — WA Core iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.0
+// @version      0.1.1
 // @description  Capture volontaire de page ou de sélection vers la mémoire Web Augmenté.
 // @match        http://*/*
 // @match        https://*/*
@@ -9,6 +9,8 @@
 // @grant        GM.setValue
 // @grant        GM.xmlHttpRequest
 // @inject-into  content
+// @updateURL    https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/core/wa-core-ios.user.js
+// @downloadURL  https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/core/wa-core-ios.user.js
 // @noframes
 // @run-at       document-idle
 // ==/UserScript==
@@ -18,7 +20,10 @@
 
   if (document.getElementById('wa-core-ios-host')) return;
 
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
+  const DEFAULT_ENDPOINT = 'https://web-augmente-api.osmanjulien-arch.workers.dev/api/wa';
+  // Userscripts Safari injects GM as a function parameter, not window.GM.
+  const userscriptApi = typeof GM !== 'undefined' && GM ? GM : null;
   const STORAGE_KEYS = {
     endpoint: 'wa-core:endpoint',
     token: 'wa-core:token'
@@ -36,33 +41,30 @@
   };
 
   function hasModernGM(method) {
-    return typeof globalThis.GM === 'object' && typeof globalThis.GM?.[method] === 'function';
+    return typeof userscriptApi?.[method] === 'function';
+  }
+
+  function requireUserscriptApis() {
+    if (!['getValue', 'setValue', 'xmlHttpRequest'].every(hasModernGM)) {
+      throw new Error('API Userscripts indisponibles. Mets à jour WA Core dans Userscripts, autorise l’extension sur ce site puis recharge la page. Aucun token ne sera demandé ni stocké dans le site.');
+    }
   }
 
   async function getStored(key, fallback = '') {
-    if (hasModernGM('getValue')) {
-      try {
-        return await globalThis.GM.getValue(key, fallback);
-      } catch {}
-    }
     try {
-      return localStorage.getItem(key) ?? fallback;
+      const value = await userscriptApi.getValue(key, fallback);
+      return typeof value === 'string' ? value : fallback;
     } catch {
-      return fallback;
+      throw new Error('Lecture du stockage Userscripts impossible. Le token n’a pas été effacé ; vérifie l’extension puis recharge la page.');
     }
   }
 
   async function setStored(key, value) {
-    if (hasModernGM('setValue')) {
-      try {
-        await globalThis.GM.setValue(key, value);
-        return;
-      } catch {}
-    }
     try {
-      localStorage.setItem(key, value);
+      await userscriptApi.setValue(key, value);
+      if (await userscriptApi.getValue(key, null) !== value) throw new Error('storage-verification-failed');
     } catch {
-      throw new Error('Safari refuse le stockage local pour ce site.');
+      throw new Error('Enregistrement Userscripts non confirmé. Aucun repli vers le stockage du site. Vérifie l’extension avant de réessayer.');
     }
   }
 
@@ -209,11 +211,12 @@
   function validateEndpoint(value) {
     try {
       const url = new URL(String(value || '').trim());
-      if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) {
+      if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname))) {
         throw new Error('HTTPS requis');
       }
+      if (url.username || url.password || url.search || url.hash) throw new Error('Adresse sans identifiants ni paramètres requise');
       if (!url.pathname || url.pathname === '/') url.pathname = '/api/wa';
-      url.hash = '';
+      if (url.pathname !== '/api/wa') throw new Error('Chemin /api/wa requis');
       return url.toString();
     } catch {
       throw new Error('Adresse API invalide. Exemple : https://nom.workers.dev/api/wa');
@@ -221,10 +224,11 @@
   }
 
   async function configureConnection() {
+    requireUserscriptApis();
     const currentEndpoint = await getStored(STORAGE_KEYS.endpoint, '');
     const endpointInput = globalThis.prompt(
       'Adresse de l’endpoint Web Augmenté :',
-      currentEndpoint || 'https://web-augmente-api.example.workers.dev/api/wa'
+      currentEndpoint || DEFAULT_ENDPOINT
     );
     if (endpointInput === null) return false;
 
@@ -242,14 +246,15 @@
 
     await setStored(STORAGE_KEYS.endpoint, endpoint);
     await setStored(STORAGE_KEYS.token, token);
-    setStatus(`Connexion configurée : ${new URL(endpoint).hostname}`, 'success');
+    setStatus(`Configuration enregistrée dans Userscripts pour tous les sites · WA ${VERSION}`, 'success');
     return true;
   }
 
   async function getConnection(requireToken = true) {
-    let endpoint = await getStored(STORAGE_KEYS.endpoint, '');
-    let token = await getStored(STORAGE_KEYS.token, '');
-    if (!endpoint || (requireToken && !token)) {
+    requireUserscriptApis();
+    let endpoint = await getStored(STORAGE_KEYS.endpoint, '') || DEFAULT_ENDPOINT;
+    let token = requireToken ? await getStored(STORAGE_KEYS.token, '') : '';
+    if (requireToken && !token) {
       const configured = await configureConnection();
       if (!configured) throw new Error('Connexion non configurée.');
       endpoint = await getStored(STORAGE_KEYS.endpoint, '');
@@ -259,30 +264,35 @@
   }
 
   async function requestWithGM(url, options) {
-    const response = await globalThis.GM.xmlHttpRequest({
-      url,
-      method: options.method,
-      headers: options.headers,
-      data: options.body,
-      responseType: 'text',
-      timeout: 20000
-    });
-    let data;
+    let response;
     try {
-      data = JSON.parse(response.responseText || '{}');
+      response = await userscriptApi.xmlHttpRequest({
+        url,
+        method: options.method,
+        headers: options.headers,
+        data: options.body,
+        responseType: 'text',
+        timeout: 20000
+      });
     } catch {
-      data = { error: 'Réponse serveur illisible.' };
+      throw new Error('Réseau Userscripts : envoi impossible ou délai dépassé. Vérifie la connexion et les autorisations de l’extension. Le token enregistré est conservé.');
+    }
+    if (!response || !response.status) {
+      throw new Error('Réseau Userscripts : aucune réponse HTTP. Vérifie la connexion et les autorisations de l’extension. Le token enregistré est conservé.');
+    }
+    if (response.status === 401) {
+      throw new Error('Token refusé par le Worker (HTTP 401). Utilise « Configurer la connexion » pour le corriger ; aucune nouvelle saisie automatique.');
     }
     if (response.status < 200 || response.status >= 300) {
-      throw new Error(data.message || data.error || `Erreur HTTP ${response.status}`);
+      throw new Error(`Erreur HTTP ${response.status}. Le token enregistré est conservé.`);
     }
-    return data;
-  }
-
-  async function requestWithFetch(url, options) {
-    const response = await fetch(url, options);
-    const data = await response.json().catch(() => ({ error: 'Réponse serveur illisible.' }));
-    if (!response.ok) throw new Error(data.message || data.error || `Erreur HTTP ${response.status}`);
+    let data;
+    try {
+      data = JSON.parse(response.responseText);
+    } catch {
+      throw new Error('Réponse serveur illisible. Vérifie que l’adresse se termine par /api/wa.');
+    }
+    if (!data || data.ok !== true) throw new Error('Réponse API inattendue : envoi non confirmé.');
     return data;
   }
 
@@ -296,8 +306,9 @@
       body: JSON.stringify({ action, page })
     };
 
-    if (hasModernGM('xmlHttpRequest')) return requestWithGM(endpoint, options);
-    return requestWithFetch(endpoint, { ...options, mode: 'cors', credentials: 'omit' });
+    const result = await requestWithGM(endpoint, options);
+    if (result.action !== action) throw new Error('Réponse API inattendue : action non confirmée.');
+    return result;
   }
 
   const host = document.createElement('div');
@@ -351,7 +362,7 @@
   panel.setAttribute('aria-label', 'Web Augmenté');
   panel.innerHTML = `
     <div class="head">
-      <div><div class="title">Web Augmenté</div><div class="site"></div></div>
+      <div><div class="title">Web Augmenté · ${VERSION}</div><div class="site"></div></div>
       <button class="close" type="button" aria-label="Fermer">×</button>
     </div>
     <button class="action primary" data-action="send-page" type="button">Envoyer cette page</button>
@@ -432,7 +443,7 @@
     setStatus('Test de connexion…');
     try {
       const result = await callApi('health', undefined, false);
-      setStatus(`Connexion opérationnelle · API ${result.version || 'OK'}`, 'success');
+      setStatus(`Serveur joignable via Userscripts · API ${result.version || 'OK'} · ce test public ne valide pas le token`, 'success');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'Connexion impossible.', 'error');
     } finally {
