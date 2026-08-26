@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Web Augmenté — WA Sites iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.1
-// @description  Nettoyage local réversible Amazon, Google, Reddit, Shorts et publications YouTube. Aucun envoi ni token.
+// @version      0.2.0
+// @description  Améliorations réversibles Amazon, Google, Reddit et YouTube, avec segments SponsorBlock facultatifs.
 // @match        https://amazon.fr/*
 // @match        https://*.amazon.fr/*
 // @match        https://google.fr/*
@@ -17,6 +17,8 @@
 // @match        https://m.youtube.com/*
 // @grant        GM.getValue
 // @grant        GM.setValue
+// @grant        GM.xmlHttpRequest
+// @connect      sponsor.ajay.app
 // @inject-into  content
 // @updateURL    https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js
 // @downloadURL  https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js
@@ -34,6 +36,7 @@ function createSitesEffects(doc) {
   const hidden = new Map();
   const journals = new Map();
   const badges = new Map();
+  const inserted = new Map();
   const ensure = (map, key) => { if (!map.has(key)) map.set(key, new Map()); return map.get(key); };
   const restore = (el, name, value) => { if (value === null) el.removeAttribute(name); else el.setAttribute(name, value); };
 
@@ -70,6 +73,14 @@ function createSitesEffects(doc) {
     if (item.textContent !== text) item.textContent = text;
   }
 
+  function insert(anchor, item, owner) {
+    if (!anchor || !item || !anchor.isConnected) return;
+    item.dataset.waUi = '1';
+    anchor.appendChild(item);
+    if (!inserted.has(owner)) inserted.set(owner, new Set());
+    inserted.get(owner).add(item);
+  }
+
   function clear(owner) {
     for (const [el, record] of hidden) {
       record.owners.delete(owner);
@@ -85,6 +96,8 @@ function createSitesEffects(doc) {
     journals.delete(owner);
     for (const item of (badges.get(owner) || new Map()).values()) item.remove();
     badges.delete(owner);
+    for (const item of inserted.get(owner) || []) item.remove();
+    inserted.delete(owner);
   }
 
   function prune() {
@@ -93,14 +106,16 @@ function createSitesEffects(doc) {
     for (const items of badges.values()) for (const [anchor, item] of items) {
       if (!anchor.isConnected) { item.remove(); items.delete(anchor); }
     }
+    for (const items of inserted.values()) for (const item of items) if (!item.isConnected) items.delete(item);
   }
 
   function count(owner) {
     return [...hidden].filter(([el, r]) => el.isConnected && r.owners.has(owner)).length +
       [...(journals.get(owner) || new Map()).keys()].filter(el => el.isConnected).length +
-      [...(badges.get(owner) || new Map()).values()].filter(el => el.isConnected).length;
+      [...(badges.get(owner) || new Map()).values()].filter(el => el.isConnected).length +
+      [...(inserted.get(owner) || new Set())].filter(el => el.isConnected).length;
   }
-  return { hide, attr, badge, clear, prune, count };
+  return { hide, attr, badge, insert, clear, prune, count };
 }
 
 function sitesRoute(hostname, pathname) {
@@ -126,6 +141,7 @@ function createSitesContext(doc, location, effects, owner) {
     hide: el => effects.hide(el, owner),
     attr: (el, name, value) => effects.attr(el, name, value, owner),
     badge: (el, text) => effects.badge(el, text, owner),
+    insert: (el, item) => effects.insert(el, item, owner),
     safeHttp(raw) {
       try {
         const url = new URL(raw, location.href);
@@ -209,7 +225,43 @@ function googleSiteModules() {
 }
 
 // Source: src/sites/youtube.js
-function youtubeSiteModules() {
+function youtubeSiteModules(GM) {
+  const sponsorCache = new Map();
+  const sponsorCategories = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'music_offtopic'];
+
+  function sponsorSegments(ctx) {
+    if (ctx.location.pathname !== '/watch') return;
+    const videoId = new URL(ctx.location.href).searchParams.get('v');
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId || '')) return;
+    const video = ctx.doc.querySelector('video');
+    const bar = ctx.doc.querySelector('.ytp-progress-list,.player-controls-progress-bar');
+    const cached = sponsorCache.get(videoId);
+    if (cached && cached.state === 'ready' && video && bar && Number.isFinite(video.duration) && video.duration > 0) {
+      for (const row of cached.rows) {
+        const segment = Array.isArray(row.segment) ? row.segment : [];
+        const start = Number(segment[0]), end = Number(segment[1]);
+        if (!(start >= 0 && end > start && end <= video.duration + 2)) continue;
+        const marker = ctx.doc.createElement('span');
+        marker.className = 'wa-sponsorblock-segment';
+        marker.title = `SponsorBlock : ${String(row.category || 'segment')}`;
+        marker.style.cssText = `position:absolute;left:${start / video.duration * 100}%;width:${(end - start) / video.duration * 100}%;top:0;bottom:0;background:#00b894;pointer-events:none;z-index:9`;
+        ctx.insert(bar, marker);
+      }
+      return;
+    }
+    if (cached || !GM || typeof GM.xmlHttpRequest !== 'function') return;
+    sponsorCache.set(videoId, { state: 'loading' });
+    const url = 'https://sponsor.ajay.app/api/skipSegments?videoID=' + encodeURIComponent(videoId) + '&categories=' + encodeURIComponent(JSON.stringify(sponsorCategories));
+    return Promise.resolve(GM.xmlHttpRequest({ method: 'GET', url, timeout: 10000, headers: { Accept: 'application/json' } }))
+      .then(response => {
+        if (response.status === 404) { sponsorCache.set(videoId, { state: 'ready', rows: [] }); return; }
+        if (response.status !== 200) throw new Error('SponsorBlock unavailable');
+        const rows = JSON.parse(response.responseText || '[]');
+        sponsorCache.set(videoId, { state: 'ready', rows: Array.isArray(rows) ? rows.slice(0, 100) : [] });
+      })
+      .catch(() => sponsorCache.set(videoId, { state: 'error' }));
+  }
+
   return [
     { id: 'youtube-shorts', site: 'youtube', label: 'Masquer les Shorts dans les listes', defaultOn: true,
       run(ctx) {
@@ -240,7 +292,9 @@ function youtubeSiteModules() {
           const card = link.closest('ytd-rich-section-renderer,ytm-rich-section-renderer,ytd-rich-item-renderer,ytm-rich-item-renderer,ytd-post-renderer,ytm-post-renderer');
           if (card) ctx.hide(card);
         }
-      } }
+      } },
+    { id: 'youtube-sponsorblock', site: 'youtube', label: 'Afficher les segments SponsorBlock (envoie seulement l’identifiant vidéo)', defaultOn: false,
+      run: sponsorSegments }
   ];
 }
 
@@ -272,7 +326,7 @@ function redditSiteModules() {
 // Source: src/sites/app.js
 function startSitesApp(GM) {
   if (!sitesRoute(location.hostname, location.pathname)) return null;
-  const modules = [...amazonSiteModules(), ...googleSiteModules(), ...youtubeSiteModules(), ...redditSiteModules()];
+  const modules = [...amazonSiteModules(), ...googleSiteModules(), ...youtubeSiteModules(GM), ...redditSiteModules()];
   const key = 'wa-sites:settings:v1';
   const defaults = Object.fromEntries(modules.map(module => [module.id, module.defaultOn]));
   let settings = { ...defaults };
@@ -295,12 +349,12 @@ function startSitesApp(GM) {
     .action{display:block;width:100%;padding:12px;border:1px solid #0f766e;border-radius:10px;background:#f0fdfa;color:#134e4a;margin:10px 0;min-height:44px}
     .status{font-size:13px;color:#475569}
   </style><section class="panel" hidden aria-label="Réglages WA Sites">
-    <header><h2>WA Sites · 0.1.1</h2><button class="close" aria-label="Fermer">×</button></header>
+    <header><h2>WA Sites · 0.2.0</h2><button class="close" aria-label="Fermer">×</button></header>
     <p class="site"></p><div class="modules"></div>
     <button class="action compare">Voir l’original — pause</button>
     <button class="action temporary" hidden>Activer pour cette page seulement</button>
     <p class="status" role="status" aria-live="polite"></p>
-    <small>Traitement local. Aucun envoi, aucun token. Les réglages sont propres à WA Sites.</small>
+    <small>Filtres locaux, sans token. SponsorBlock est facultatif et n’envoie que l’identifiant de la vidéo à sponsor.ajay.app.</small>
   </section><button class="launcher" aria-expanded="false" aria-label="Ouvrir WA Sites">Sites</button>`;
   document.body.appendChild(host);
   const pageStyle = document.createElement('style'); pageStyle.dataset.waUi = '1';
@@ -343,7 +397,10 @@ function startSitesApp(GM) {
     if (ready && allowed && !paused && !suspended && !document.hidden && currentSite) {
       for (const module of modules) {
         if (module.site !== currentSite || !settings[module.id]) continue;
-        try { module.run(createSitesContext(document, location, effects, module.id)); }
+        try {
+          const pending = module.run(createSitesContext(document, location, effects, module.id));
+          if (pending && typeof pending.then === 'function') pending.then(() => schedule());
+        }
         catch { effects.clear(module.id); notice = 'Une fonction a été ignorée sur cette page. Les autres restent disponibles.'; }
       }
     }

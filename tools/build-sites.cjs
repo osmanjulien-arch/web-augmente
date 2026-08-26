@@ -14,5 +14,5 @@ if (process.argv.includes('--check')) {
 } else {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, output);
-  console.log(`WA Sites : ${Buffer.byteLength(output)} octets, aucun code distant`);
+  console.log(`WA Sites : ${Buffer.byteLength(output)} octets, bundle local reproductible`);
 }

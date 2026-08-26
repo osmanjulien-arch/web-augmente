@@ -1,6 +1,6 @@
 function startSitesApp(GM) {
   if (!sitesRoute(location.hostname, location.pathname)) return null;
-  const modules = [...amazonSiteModules(), ...googleSiteModules(), ...youtubeSiteModules(), ...redditSiteModules()];
+  const modules = [...amazonSiteModules(), ...googleSiteModules(), ...youtubeSiteModules(GM), ...redditSiteModules()];
   const key = 'wa-sites:settings:v1';
   const defaults = Object.fromEntries(modules.map(module => [module.id, module.defaultOn]));
   let settings = { ...defaults };
@@ -23,12 +23,12 @@ function startSitesApp(GM) {
     .action{display:block;width:100%;padding:12px;border:1px solid #0f766e;border-radius:10px;background:#f0fdfa;color:#134e4a;margin:10px 0;min-height:44px}
     .status{font-size:13px;color:#475569}
   </style><section class="panel" hidden aria-label="Réglages WA Sites">
-    <header><h2>WA Sites · 0.1.1</h2><button class="close" aria-label="Fermer">×</button></header>
+    <header><h2>WA Sites · 0.2.0</h2><button class="close" aria-label="Fermer">×</button></header>
     <p class="site"></p><div class="modules"></div>
     <button class="action compare">Voir l’original — pause</button>
     <button class="action temporary" hidden>Activer pour cette page seulement</button>
     <p class="status" role="status" aria-live="polite"></p>
-    <small>Traitement local. Aucun envoi, aucun token. Les réglages sont propres à WA Sites.</small>
+    <small>Filtres locaux, sans token. SponsorBlock est facultatif et n’envoie que l’identifiant de la vidéo à sponsor.ajay.app.</small>
   </section><button class="launcher" aria-expanded="false" aria-label="Ouvrir WA Sites">Sites</button>`;
   document.body.appendChild(host);
   const pageStyle = document.createElement('style'); pageStyle.dataset.waUi = '1';
@@ -71,7 +71,10 @@ function startSitesApp(GM) {
     if (ready && allowed && !paused && !suspended && !document.hidden && currentSite) {
       for (const module of modules) {
         if (module.site !== currentSite || !settings[module.id]) continue;
-        try { module.run(createSitesContext(document, location, effects, module.id)); }
+        try {
+          const pending = module.run(createSitesContext(document, location, effects, module.id));
+          if (pending && typeof pending.then === 'function') pending.then(() => schedule());
+        }
         catch { effects.clear(module.id); notice = 'Une fonction a été ignorée sur cette page. Les autres restent disponibles.'; }
       }
     }

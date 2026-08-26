@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Web Augmenté — WA Sites iOS
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.1
-// @description  Nettoyage local réversible Amazon, Google, Reddit, Shorts et publications YouTube. Aucun envoi ni token.
+// @version      0.2.0
+// @description  Améliorations réversibles Amazon, Google, Reddit et YouTube, avec segments SponsorBlock facultatifs.
 // @match        https://amazon.fr/*
 // @match        https://*.amazon.fr/*
 // @match        https://google.fr/*
@@ -17,6 +17,8 @@
 // @match        https://m.youtube.com/*
 // @grant        GM.getValue
 // @grant        GM.setValue
+// @grant        GM.xmlHttpRequest
+// @connect      sponsor.ajay.app
 // @inject-into  content
 // @updateURL    https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js
 // @downloadURL  https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js

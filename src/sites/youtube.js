@@ -1,4 +1,40 @@
-function youtubeSiteModules() {
+function youtubeSiteModules(GM) {
+  const sponsorCache = new Map();
+  const sponsorCategories = ['sponsor', 'selfpromo', 'interaction', 'intro', 'outro', 'preview', 'music_offtopic'];
+
+  function sponsorSegments(ctx) {
+    if (ctx.location.pathname !== '/watch') return;
+    const videoId = new URL(ctx.location.href).searchParams.get('v');
+    if (!/^[A-Za-z0-9_-]{6,20}$/.test(videoId || '')) return;
+    const video = ctx.doc.querySelector('video');
+    const bar = ctx.doc.querySelector('.ytp-progress-list,.player-controls-progress-bar');
+    const cached = sponsorCache.get(videoId);
+    if (cached && cached.state === 'ready' && video && bar && Number.isFinite(video.duration) && video.duration > 0) {
+      for (const row of cached.rows) {
+        const segment = Array.isArray(row.segment) ? row.segment : [];
+        const start = Number(segment[0]), end = Number(segment[1]);
+        if (!(start >= 0 && end > start && end <= video.duration + 2)) continue;
+        const marker = ctx.doc.createElement('span');
+        marker.className = 'wa-sponsorblock-segment';
+        marker.title = `SponsorBlock : ${String(row.category || 'segment')}`;
+        marker.style.cssText = `position:absolute;left:${start / video.duration * 100}%;width:${(end - start) / video.duration * 100}%;top:0;bottom:0;background:#00b894;pointer-events:none;z-index:9`;
+        ctx.insert(bar, marker);
+      }
+      return;
+    }
+    if (cached || !GM || typeof GM.xmlHttpRequest !== 'function') return;
+    sponsorCache.set(videoId, { state: 'loading' });
+    const url = 'https://sponsor.ajay.app/api/skipSegments?videoID=' + encodeURIComponent(videoId) + '&categories=' + encodeURIComponent(JSON.stringify(sponsorCategories));
+    return Promise.resolve(GM.xmlHttpRequest({ method: 'GET', url, timeout: 10000, headers: { Accept: 'application/json' } }))
+      .then(response => {
+        if (response.status === 404) { sponsorCache.set(videoId, { state: 'ready', rows: [] }); return; }
+        if (response.status !== 200) throw new Error('SponsorBlock unavailable');
+        const rows = JSON.parse(response.responseText || '[]');
+        sponsorCache.set(videoId, { state: 'ready', rows: Array.isArray(rows) ? rows.slice(0, 100) : [] });
+      })
+      .catch(() => sponsorCache.set(videoId, { state: 'error' }));
+  }
+
   return [
     { id: 'youtube-shorts', site: 'youtube', label: 'Masquer les Shorts dans les listes', defaultOn: true,
       run(ctx) {
@@ -29,6 +65,8 @@ function youtubeSiteModules() {
           const card = link.closest('ytd-rich-section-renderer,ytm-rich-section-renderer,ytd-rich-item-renderer,ytm-rich-item-renderer,ytd-post-renderer,ytm-post-renderer');
           if (card) ctx.hide(card);
         }
-      } }
+      } },
+    { id: 'youtube-sponsorblock', site: 'youtube', label: 'Afficher les segments SponsorBlock (envoie seulement l’identifiant vidéo)', defaultOn: false,
+      run: sponsorSegments }
   ];
 }

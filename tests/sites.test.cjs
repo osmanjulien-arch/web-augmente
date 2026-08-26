@@ -161,6 +161,42 @@ test('YouTube : post et onglet Communauté ouverts volontairement conservés', (
   }
 });
 
+test('YouTube : SponsorBlock est facultatif et ne saute jamais la vidéo', async () => {
+  const calls = [];
+  const gm = { xmlHttpRequest: async options => {
+    calls.push(options);
+    return { status: 200, responseText: JSON.stringify([
+      { segment: [10, 20], category: 'sponsor' },
+      { segment: [25, 24], category: 'invalid' }
+    ]) };
+  } };
+  const f = fixture('<video id="video"></video><div class="ytp-progress-list" id="bar"></div>', 'https://m.youtube.com/watch?v=abcDEF_1234');
+  Object.defineProperty(f.q('#video'), 'duration', { value: 100, configurable: true });
+  const module = f.context.youtubeSiteModules(gm).find(item => item.id === 'youtube-sponsorblock');
+  assert.equal(module.defaultOn, false);
+  const pending = module.run(f.context.createSitesContext(f.document, f.location, f.effects, module.id));
+  await pending;
+  module.run(f.context.createSitesContext(f.document, f.location, f.effects, module.id));
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /^https:\/\/sponsor\.ajay\.app\/api\/skipSegments\?/);
+  assert.equal(f.document.querySelectorAll('.wa-sponsorblock-segment').length, 1);
+  assert.equal(f.q('#video').currentTime || 0, 0);
+  f.effects.clear(module.id);
+  assert.equal(f.document.querySelectorAll('.wa-sponsorblock-segment').length, 0);
+});
+
+test('YouTube : SponsorBlock ne contacte rien hors vidéo ou sans permission', () => {
+  let calls = 0;
+  const gm = { xmlHttpRequest: async () => { calls++; return { status: 200, responseText: '[]' }; } };
+  const home = fixture('', 'https://m.youtube.com/');
+  home.context.youtubeSiteModules(gm).find(item => item.id === 'youtube-sponsorblock')
+    .run(home.context.createSitesContext(home.document, home.location, home.effects, 'youtube-sponsorblock'));
+  const watch = fixture('<video></video><div class="ytp-progress-list"></div>', 'https://m.youtube.com/watch?v=abcDEF_1234');
+  watch.context.youtubeSiteModules(null).find(item => item.id === 'youtube-sponsorblock')
+    .run(watch.context.createSitesContext(watch.document, watch.location, watch.effects, 'youtube-sponsorblock'));
+  assert.equal(calls, 0);
+});
+
 test('Reddit : invitation app ciblée, texte de publication et connexion conservés', () => {
   const f = fixture('<div id="app" role="dialog">Open in app<a href="https://reddit.app.link/test">Open</a></div><div id="login" role="dialog">Open in app<form><input type="password"></form><a href="reddit://test">Open</a></div><article id="post">Open in app<a href="reddit://test">Test</a></article><div id="other" role="dialog">Cookie consent<a href="https://apps.apple.com/test">app</a></div>', 'https://www.reddit.com/r/test');
   f.run('reddit-app-prompts'); assert.ok(hidden(f.q('#app')));
@@ -251,9 +287,12 @@ test('application : ouvert/fermé et modules affichés selon le site', async () 
   click(f, '.close'); assert.equal(root.querySelector('.panel').hidden, true);
 });
 
-test('bundle : GM lexical Safari, aucune API réseau ni stockage page', async () => {
+test('bundle : GM lexical Safari, réseau limité à SponsorBlock et aucun stockage page', async () => {
   const bundle = fs.readFileSync(path.join(base, 'scripts/sites/wa-sites-ios.user.js'), 'utf8');
-  for (const forbidden of [/\bfetch\s*\(/, /\bXMLHttpRequest\b/, /\bxmlHttpRequest\b/, /\blocalStorage\b/, /\bsessionStorage\b/, /\bsetInterval\s*\(/, /\beval\s*\(/, /@require\s/]) assert.doesNotMatch(bundle, forbidden);
+  for (const forbidden of [/\bfetch\s*\(/, /\bXMLHttpRequest\b/, /\blocalStorage\b/, /\bsessionStorage\b/, /\bsetInterval\s*\(/, /\beval\s*\(/, /@require\s/]) assert.doesNotMatch(bundle, forbidden);
+  assert.match(bundle, /@grant\s+GM\.xmlHttpRequest/);
+  assert.match(bundle, /@connect\s+sponsor\.ajay\.app/);
+  assert.equal((bundle.match(/https:\/\/sponsor\.ajay\.app/g) || []).length, 1);
   const f = fixture('<div id="ad" class="AdHolder">Ad</div>'), gm = memory();
   const run = vm.runInContext(`(function(GM){${bundle}\n})`, f.context);
   assert.equal(f.context.GM, undefined); run(gm); await new Promise(resolve => setImmediate(resolve));

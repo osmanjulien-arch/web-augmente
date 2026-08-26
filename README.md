@@ -68,15 +68,16 @@ node tools/build-core.cjs --check
 node --test tests/wa-core-ios.test.cjs tests/local-tools.test.cjs
 ```
 
-## WA Sites 0.1.1 — améliorations automatiques (candidat iPhone)
+## WA Sites 0.2.0 — améliorations automatiques (candidat iPhone)
 
-Un deuxième fichier regroupe neuf fonctions locales pour Amazon.fr, Google.fr/com,
+Un deuxième fichier regroupe les fonctions pour Amazon.fr, Google.fr/com,
 YouTube et Reddit. Le bouton **Sites**, en bas à gauche, propose des interrupteurs
 et **Voir l’original — pause**. Le bouton **WA** et la connexion mémoire restent inchangés.
 
 - Amazon : sponsorisés et Rufus masqués, badge vendeur si identifiable ; encarts Prime/carte en option.
 - Google : publicités identifiées masquées et liens directs, sans supprimer les paramètres de destination.
 - YouTube : Shorts et publications communautaires masqués dans les listes, sans bloquer un contenu ouvert volontairement.
+- YouTube : repères SponsorBlock facultatifs sur la barre, sans saut automatique ; ce module envoie uniquement l’identifiant vidéo à SponsorBlock.
 - Reddit : certaines invitations à ouvrir l’application, pas les vrais formulaires de connexion.
 
 [Installer WA Sites dans Userscripts](https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/feature/wa-core-v1/scripts/sites/wa-sites-ios.user.js)

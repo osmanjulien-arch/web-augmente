@@ -46,7 +46,7 @@ Principe : ne pas installer aveuglément plusieurs scripts qui modifient la mêm
 | Script sélectionné | Utilité | Intégration Web Augmenté |
 |---|---|---|
 | YouTube Alchemy | Améliorations de l’interface YouTube | À auditer puis adapter à Safari iOS |
-| SponsorBlock Seek Bar Only | Visualiser les segments SponsorBlock sur la barre de progression | À intégrer si l’API/dépendance réseau est compatible et sûre |
+| SponsorBlock Seek Bar Only | Visualiser les segments SponsorBlock sur la barre de progression | Intégré en option dans WA Sites 0.2.0 ; validation Safari iPhone encore requise |
 
 ## Réseaux sociaux
 

@@ -3,6 +3,7 @@ function createSitesEffects(doc) {
   const hidden = new Map();
   const journals = new Map();
   const badges = new Map();
+  const inserted = new Map();
   const ensure = (map, key) => { if (!map.has(key)) map.set(key, new Map()); return map.get(key); };
   const restore = (el, name, value) => { if (value === null) el.removeAttribute(name); else el.setAttribute(name, value); };
 
@@ -39,6 +40,14 @@ function createSitesEffects(doc) {
     if (item.textContent !== text) item.textContent = text;
   }
 
+  function insert(anchor, item, owner) {
+    if (!anchor || !item || !anchor.isConnected) return;
+    item.dataset.waUi = '1';
+    anchor.appendChild(item);
+    if (!inserted.has(owner)) inserted.set(owner, new Set());
+    inserted.get(owner).add(item);
+  }
+
   function clear(owner) {
     for (const [el, record] of hidden) {
       record.owners.delete(owner);
@@ -54,6 +63,8 @@ function createSitesEffects(doc) {
     journals.delete(owner);
     for (const item of (badges.get(owner) || new Map()).values()) item.remove();
     badges.delete(owner);
+    for (const item of inserted.get(owner) || []) item.remove();
+    inserted.delete(owner);
   }
 
   function prune() {
@@ -62,14 +73,16 @@ function createSitesEffects(doc) {
     for (const items of badges.values()) for (const [anchor, item] of items) {
       if (!anchor.isConnected) { item.remove(); items.delete(anchor); }
     }
+    for (const items of inserted.values()) for (const item of items) if (!item.isConnected) items.delete(item);
   }
 
   function count(owner) {
     return [...hidden].filter(([el, r]) => el.isConnected && r.owners.has(owner)).length +
       [...(journals.get(owner) || new Map()).keys()].filter(el => el.isConnected).length +
-      [...(badges.get(owner) || new Map()).values()].filter(el => el.isConnected).length;
+      [...(badges.get(owner) || new Map()).values()].filter(el => el.isConnected).length +
+      [...(inserted.get(owner) || new Set())].filter(el => el.isConnected).length;
   }
-  return { hide, attr, badge, clear, prune, count };
+  return { hide, attr, badge, insert, clear, prune, count };
 }
 
 function sitesRoute(hostname, pathname) {
@@ -95,6 +108,7 @@ function createSitesContext(doc, location, effects, owner) {
     hide: el => effects.hide(el, owner),
     attr: (el, name, value) => effects.attr(el, name, value, owner),
     badge: (el, text) => effects.badge(el, text, owner),
+    insert: (el, item) => effects.insert(el, item, owner),
     safeHttp(raw) {
       try {
         const url = new URL(raw, location.href);
