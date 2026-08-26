@@ -64,6 +64,28 @@ L’écran `/authorize` demande le secret personnel par formulaire HTTPS POST. L
 
 ## Ajouter le MCP dans ChatGPT
 
+### Retour OAuth et protection du formulaire
+
+Chrome peut appliquer `form-action` aux redirections qui suivent une soumission.
+Une CSP limitée à `'self'` bloquait donc le retour vers ChatGPT après la validation
+du secret (réponse 302 puis erreur CSP dans la console du navigateur).
+
+Le formulaire autorise désormais `'self'` et l’adresse fixe
+`https://chatgpt.com/connector_platform_oauth_redirect`, uniquement lorsque cette
+adresse exacte est le `redirectUri` validé par le provider OAuth. Aucune URL fournie
+par un client n’est interpolée dans la CSP. Les autres formulaires et les pages
+d’erreur restent limités à `'self'` ; aucun joker n’est ajouté.
+
+Le POST contenant le secret reste dirigé vers `/authorize` sur le Worker ; le
+retour OAuth contient le code d’autorisation, pas le secret personnel. Les
+protections CSRF, cookies, PKCE, expiration et scope ne changent pas.
+Cette correction ne résout pas à elle seule un éventuel `STATE_COOKIE_MISSING`.
+
+Les tests vérifient la CSP exacte et le parcours provider → code → token → MCP
+en local. Ils ne remplacent pas une connexion réelle dans Chrome/Safari après
+déploiement. Relancer une connexion depuis ChatGPT avec un formulaire neuf ; ne
+pas réutiliser un formulaire déjà soumis ni partager les URL de callback complètes.
+
 ### Diagnostic d’un refus OAuth
 
 Les erreurs de session affichent un **code diagnostic** et une **référence**

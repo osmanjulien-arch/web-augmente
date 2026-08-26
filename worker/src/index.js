@@ -15,6 +15,7 @@ const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 const OAUTH_SCOPE = 'memory:read';
 const PUBLIC_ORIGIN = 'https://web-augmente-api.osmanjulien-arch.workers.dev';
 const MCP_RESOURCE = `${PUBLIC_ORIGIN}/mcp`;
+const CHATGPT_OAUTH_CALLBACK = 'https://chatgpt.com/connector_platform_oauth_redirect';
 const OAUTH_STATE_COOKIE = '__Host-WA-OAUTH-STATE';
 const OAUTH_CSRF_COOKIE = '__Host-WA-OAUTH-CSRF';
 const OAUTH_DIAGNOSTIC_MESSAGES = Object.freeze({
@@ -463,11 +464,17 @@ function clearAuthCookies() {
   ];
 }
 
-function securityHeaders(contentType = 'text/html; charset=utf-8') {
+function securityHeaders(contentType = 'text/html; charset=utf-8', oauthRedirectUri = null) {
+  // Chrome also checks form-action on the post-submit redirect. Only admit the
+  // fixed ChatGPT callback when the OAuth provider validated that exact URI.
+  // Never interpolate a client-supplied URI into the CSP.
+  const formAction = oauthRedirectUri === CHATGPT_OAUTH_CALLBACK
+    ? `'self' ${CHATGPT_OAUTH_CALLBACK}`
+    : "'self'";
   return {
     'X-WA-OAuth-Diagnostics': '1',
     'Cache-Control': 'no-store',
-    'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action ${formAction}; frame-ancestors 'none'; base-uri 'none'`,
     'Content-Type': contentType,
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
     'Referrer-Policy': 'no-referrer',
@@ -476,8 +483,8 @@ function securityHeaders(contentType = 'text/html; charset=utf-8') {
   };
 }
 
-function responseWithCookies(body, { status = 200, headers = {}, cookies = [] } = {}) {
-  const responseHeaders = new Headers({ ...securityHeaders(), ...headers });
+function responseWithCookies(body, { status = 200, headers = {}, cookies = [], oauthRedirectUri = null } = {}) {
+  const responseHeaders = new Headers({ ...securityHeaders(undefined, oauthRedirectUri), ...headers });
   for (const cookie of cookies) responseHeaders.append('Set-Cookie', cookie);
   return new Response(body, { status, headers: responseHeaders });
 }
@@ -609,6 +616,7 @@ async function beginAuthorization(request, env) {
   });
 
   return responseWithCookies(authorizePage({ client, oauthRequest, csrfToken, stateToken }), {
+    oauthRedirectUri: oauthRequest.redirectUri,
     cookies: [
       authCookie(OAUTH_STATE_COOKIE, stateToken),
       authCookie(OAUTH_CSRF_COOKIE, csrfToken)

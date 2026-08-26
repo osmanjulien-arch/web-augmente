@@ -313,7 +313,10 @@ test('OAuth protected-resource and authorization-server metadata are accessible'
   assert.deepEqual(serverMetadata.code_challenge_methods_supported, ['S256']);
 });
 
-test('the official OAuth provider completes PKCE and issues refresh tokens for MCP', async () => {
+test.each([
+  'https://client.example/callback',
+  'https://chatgpt.com/connector_platform_oauth_redirect'
+])('the official OAuth provider completes PKCE and MCP for %s', async (redirectUri) => {
   const origin = 'https://web-augmente-api.osmanjulien-arch.workers.dev';
   const testEnv = env();
   const registration = await worker.fetch(new Request(`${origin}/oauth/register`, {
@@ -321,7 +324,7 @@ test('the official OAuth provider completes PKCE and issues refresh tokens for M
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       client_name: 'Test MCP client',
-      redirect_uris: ['https://client.example/callback'],
+      redirect_uris: [redirectUri],
       token_endpoint_auth_method: 'none',
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code']
@@ -335,15 +338,29 @@ test('the official OAuth provider completes PKCE and issues refresh tokens for M
   const authorizeUrl = new URL(`${origin}/authorize`);
   authorizeUrl.searchParams.set('response_type', 'code');
   authorizeUrl.searchParams.set('client_id', registeredClient.client_id);
-  authorizeUrl.searchParams.set('redirect_uri', 'https://client.example/callback');
+  authorizeUrl.searchParams.set('redirect_uri', redirectUri);
   authorizeUrl.searchParams.set('scope', OAUTH_SCOPE);
   authorizeUrl.searchParams.set('state', 'integration-state');
   authorizeUrl.searchParams.set('code_challenge', await pkceChallenge(verifier));
   authorizeUrl.searchParams.set('code_challenge_method', 'S256');
   authorizeUrl.searchParams.set('resource', `${origin}/mcp`);
 
+  const tamperedUrl = new URL(authorizeUrl);
+  tamperedUrl.searchParams.set('redirect_uri', 'https://unregistered.example/callback');
+  const rejected = await worker.fetch(new Request(tamperedUrl), testEnv, executionContext());
+  assert.equal(rejected.status, 400);
+  assert.equal(rejected.headers.get('Location'), null);
+  assert.match(rejected.headers.get('Content-Security-Policy'), /form-action 'self';/);
+  assert.equal(testEnv.OAUTH_KV.putCalls.some(({ key }) => key.startsWith(OAUTH_STATE_PREFIX)), false);
+
   const authorize = await worker.fetch(new Request(authorizeUrl), testEnv, executionContext());
   const authorizeHtml = await authorize.text();
+  const formAction = authorize.headers.get('Content-Security-Policy')
+    .split(';').map((part) => part.trim()).find((part) => part.startsWith('form-action '));
+  assert.equal(formAction, redirectUri === 'https://chatgpt.com/connector_platform_oauth_redirect'
+    ? `form-action 'self' ${redirectUri}`
+    : "form-action 'self'");
+  assert.match(authorizeHtml, /<form method="post" action="\/authorize"/);
   const start = {
     cookies: authorizationCookies(authorize),
     stateToken: hiddenValue(authorizeHtml, 'state_token'),
@@ -352,6 +369,9 @@ test('the official OAuth provider completes PKCE and issues refresh tokens for M
   const approval = await worker.fetch(authorizationPost(start, TOKEN), testEnv, executionContext());
   assert.equal(approval.status, 302);
   const callback = new URL(approval.headers.get('Location'));
+  assert.equal(callback.origin + callback.pathname, redirectUri);
+  assert.equal(approval.headers.get('Location').includes(TOKEN), false);
+  assert.equal(await approval.text(), '');
   const code = callback.searchParams.get('code');
   assert.ok(code);
   assert.equal(callback.searchParams.get('state'), 'integration-state');
@@ -362,7 +382,7 @@ test('the official OAuth provider completes PKCE and issues refresh tokens for M
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       client_id: registeredClient.client_id,
-      redirect_uri: 'https://client.example/callback',
+      redirect_uri: redirectUri,
       code,
       code_verifier: verifier,
       resource: `${origin}/mcp`
@@ -399,6 +419,45 @@ test('the official OAuth provider completes PKCE and issues refresh tokens for M
   assert.equal(mcpResponse.status, 200, JSON.stringify(initialized));
   assert.equal(initialized.result.serverInfo.name, 'web-augmente-v1');
 });
+
+test('ChatGPT consent permits only its fixed callback and preserves form security', async () => {
+  const { testEnv, completed } = oauthEnv();
+  const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect';
+  testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), redirectUri });
+  const start = await beginTestAuthorization(testEnv);
+  assert.equal(start.response.headers.get('Content-Security-Policy'),
+    `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${redirectUri}; frame-ancestors 'none'; base-uri 'none'`);
+  assert.equal(start.response.headers.get('Cache-Control'), 'no-store');
+  assert.equal(start.response.headers.get('Referrer-Policy'), 'no-referrer');
+  assert.equal(start.response.headers.get('X-Frame-Options'), 'DENY');
+  assert.match(start.html, /<form method="post" action="\/authorize"/);
+  const cookies = start.response.headers.getSetCookie();
+  assert.equal(cookies.length, 2);
+  for (const cookie of cookies) {
+    assert.match(cookie, /; Secure; HttpOnly; SameSite=Lax; Path=\/; Max-Age=600$/);
+  }
+  const denied = await handleAuthorize(authorizationPost(start, 'incorrect-personal-secret-value'), testEnv);
+  assert.equal(denied.status, 401);
+  assert.equal(completed.length, 0);
+  assert.equal(denied.headers.get('Content-Security-Policy').includes(redirectUri), false);
+});
+
+for (const redirectUri of [
+  'https://client.example/callback',
+  'https://chatgpt.com.evil.example/connector_platform_oauth_redirect',
+  'http://chatgpt.com/connector_platform_oauth_redirect',
+  'https://chatgpt.com/other-path',
+  'https://chatgpt.com/connector_platform_oauth_redirect?next=https://evil.example',
+  "https://evil.example/; form-action *; script-src 'unsafe-inline'"
+]) {
+  test(`consent never adds an unapproved redirect to CSP: ${redirectUri}`, async () => {
+    const { testEnv } = oauthEnv();
+    testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), redirectUri });
+    const start = await beginTestAuthorization(testEnv);
+    assert.equal(start.response.headers.get('Content-Security-Policy'),
+      "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
+  });
+}
 
 test('authorization escapes client metadata and rejects a wrong personal secret', async () => {
   const { testEnv, completed } = oauthEnv();
