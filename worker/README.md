@@ -9,7 +9,13 @@ Le Worker Cloudflare `web-augmente-api` conserve l’API historique du userscrip
 - `POST /mcp` : transport MCP Streamable HTTP, protégé par OAuth 2.1 ;
 - `/authorize`, `/oauth/token`, `/oauth/register` et `/.well-known/*` : autorisation et découverte OAuth.
 
-Le MCP expose un seul outil, `wa_get_last_page`. Il lit directement `meta:last_page` dans `WA_MEMORY`, ne possède aucun chemin d’écriture et signale explicitement que le texte capturé est du contenu Web non fiable.
+Le MCP expose maintenant trois outils en lecture seule :
+
+- `wa_get_last_page` lit directement `meta:last_page` dans `WA_MEMORY` et signale explicitement que le texte capturé est du contenu Web non fiable ;
+- `france_travail_events_status` vérifie si la connexion API France Travail est configurée sans exposer les secrets ;
+- `france_travail_events_search` interroge l’API officielle **Mes Evènements Emploi** avec les filtres transmis par le client MCP.
+
+L’intégration France Travail utilise OAuth 2.0 `client_credentials`. Le jeton est obtenu côté Worker, gardé uniquement en mémoire de l’isolate jusqu’à expiration et renouvelé automatiquement. Les identifiants France Travail ne transitent jamais vers ChatGPT.
 
 ## Stockage
 
@@ -43,6 +49,35 @@ npx wrangler deploy --keep-vars
 ```
 
 Ne pas recréer, remplacer ou supprimer `WA_API_TOKEN` pendant ce déploiement.
+
+### Configuration France Travail
+
+Associer l’API **Mes Evènements Emploi** à une application sur `francetravail.io`, puis configurer côté Cloudflare :
+
+```bash
+cd worker
+
+# Secrets : ne jamais les committer.
+npx wrangler secret put FRANCE_TRAVAIL_CLIENT_ID
+npx wrangler secret put FRANCE_TRAVAIL_CLIENT_SECRET
+```
+
+Ajouter ensuite comme variables Cloudflare les deux valeurs fournies par la documentation technique de l’API souscrite :
+
+```text
+FRANCE_TRAVAIL_EVENTS_SCOPE=<scope de Mes Evènements Emploi>
+FRANCE_TRAVAIL_EVENTS_URL=https://api.francetravail.io/<chemin de l'API Mes Evènements Emploi>
+```
+
+Le Worker verrouille `FRANCE_TRAVAIL_EVENTS_URL` sur HTTPS et le domaine exact `api.francetravail.io`. Si une variable manque, `france_travail_events_status` l’indique et les fonctions Web Augmenté existantes continuent de fonctionner normalement.
+
+Le point d’obtention du jeton est fixé côté code à :
+
+```text
+https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire
+```
+
+Après configuration, redéployer le Worker puis reconnecter/actualiser le plugin MCP pour que ChatGPT découvre les nouveaux outils.
 
 URL API iPhone :
 
