@@ -1,1 +1,11 @@
 WA_API_TOKEN=replace-with-at-least-20-random-characters
+
+# France Travail - Mes Evènements Emploi
+# CLIENT_ID / CLIENT_SECRET sont des secrets à stocker dans Cloudflare, jamais dans Git.
+FRANCE_TRAVAIL_CLIENT_ID=replace-with-france-travail-client-id
+FRANCE_TRAVAIL_CLIENT_SECRET=replace-with-france-travail-client-secret
+
+# Ces deux valeurs sont indiquées dans la documentation technique de l’API
+# après avoir associé « Mes Evènements Emploi » à l’application francetravail.io.
+FRANCE_TRAVAIL_EVENTS_SCOPE=replace-with-events-api-scope
+FRANCE_TRAVAIL_EVENTS_URL=https://api.francetravail.io/replace-with-events-api-path
