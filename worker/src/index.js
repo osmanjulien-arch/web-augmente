@@ -738,7 +738,7 @@ async function handleAuthorize(request, env) {
 function createWebAugmenteMcpServer(env) {
   const server = new McpServer({
     name: 'web-augmente-v1',
-    version: '1.0.0'
+    version: '1.1.0'
   });
   const pageSchema = z.object({
     id: z.string().nullable(),
