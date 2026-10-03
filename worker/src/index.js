@@ -770,15 +770,20 @@ function createWebAugmenteMcpServer(env) {
     };
   });
 
-  const franceTravailScalarParam = z.union([z.string(), z.number(), z.boolean()]);
+  const franceTravailFilterValue = z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.array(z.union([z.string(), z.number(), z.boolean()]))
+  ]);
   server.registerTool('france_travail_events_search', {
     title: 'Rechercher les événements France Travail',
-    description: 'Interroge en lecture seule l’API officielle Mes Evènements Emploi. Les paramètres sont transmis comme filtres de requête au point d’accès configuré côté Worker ; utiliser les noms de paramètres de la documentation technique France Travail.',
+    description: 'Interroge en lecture seule l’API officielle Mes Evènements Emploi. Pagination: page/size/sort. Filtres JSON supportés: modalite, dateDebut, dateFin, objectifs, publicCible, operations, typeEvenement, beneficeParticipations, codePostal, departements, secteurActivite, longitude, latitude, rayon.',
     inputSchema: z.object({
-      params: z.record(
-        z.string(),
-        z.union([franceTravailScalarParam, z.array(franceTravailScalarParam)])
-      ).default({})
+      page: z.number().int().min(0).default(0),
+      size: z.number().int().min(1).max(100).default(20),
+      sort: z.string().default('dateEvenement'),
+      filters: z.record(z.string(), franceTravailFilterValue).default({})
     }).strict(),
     annotations: {
       readOnlyHint: true,
@@ -786,9 +791,9 @@ function createWebAugmenteMcpServer(env) {
       idempotentHint: true,
       openWorldHint: true
     }
-  }, async ({ params }) => {
+  }, async ({ page, size, sort, filters }) => {
     try {
-      const result = await searchFranceTravailEvents(env, params);
+      const result = await searchFranceTravailEvents(env, { page, size, sort, filters });
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         structuredContent: result
