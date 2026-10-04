@@ -700,12 +700,13 @@ function tokenResponse(token = 'fake-access-token') {
   });
 }
 
-test('MCP exposes the four high-level France Travail tools alongside the existing read-only tools', async () => {
+test('MCP exposes the five high-level France Travail tools alongside the existing read-only tools', async () => {
   const mcp = await createMcpRpc(env());
   try {
     const listed = await mcp.rpc('tools/list');
     const names = listed.result.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      'france_travail_company_prospects',
       'france_travail_events_search',
       'france_travail_events_status',
       'france_travail_job_analyze',
@@ -714,7 +715,7 @@ test('MCP exposes the four high-level France Travail tools alongside the existin
       'france_travail_training_analysis',
       'wa_get_last_page'
     ]);
-    for (const name of ['france_travail_jobs_search', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis']) {
+    for (const name of ['france_travail_jobs_search', 'france_travail_company_prospects', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis']) {
       const tool = listed.result.tools.find((entry) => entry.name === name);
       assert.ok(tool);
       assert.equal(tool.annotations.readOnlyHint, true);
@@ -796,6 +797,151 @@ test('france_travail_jobs_search normalizes free text with ROMEO before offers',
     assert.equal(romeoBody.appellations[0].contexte, 'CVC');
     const offersCall = recorder.calls.find((entry) => entry.url.includes('/offresdemploi/v2/offres/search'));
     assert.equal(new URL(offersCall.url).searchParams.get('codeROME'), 'I1308');
+  } finally {
+    recorder.restore();
+    resetFranceTravailTokenCacheForTests();
+    await mcp.clientTransport.close();
+    await mcp.server.close();
+  }
+});
+
+test('france_travail_company_prospects uses La Bonne Boîte and safely follows its documented redirect', async () => {
+  resetFranceTravailTokenCacheForTests();
+  const recorder = installFetchRecorder([
+    { match: 'https://entreprise.francetravail.fr/connexion/oauth2/access_token', respond: tokenResponse('lbb-token') },
+    {
+      match: 'https://api.francetravail.io/partenaire/labonneboite/v2/search/',
+      respond: async () => new Response(null, {
+        status: 302,
+        headers: { Location: 'https://labonneboite.francetravail.fr/api/v2/search/?rome=I1308&citycode=38185&distance=25&page=1&page_size=20' }
+      })
+    },
+    {
+      match: 'https://labonneboite.francetravail.fr/api/v2/search/',
+      respond: async () => new Response(JSON.stringify({
+        hits: 1,
+        items: [{
+          rome: 'I1308',
+          siret: '12345678901234',
+          company_name: 'ENTREPRISE TEST CVC',
+          city: 'Grenoble',
+          citycode: '38185',
+          hiring_potential: 78.2,
+          is_high_potential: true
+        }],
+        resolved_params: {
+          jobs: [{ type: 'rome', value: 'I1308', display: 'Maintenance CVC' }],
+          locations: [{ type: 'city', value: '38185', display: 'Grenoble' }]
+        }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+  ]);
+  const mcp = await createMcpRpc(franceTravailConfiguredEnv());
+  try {
+    const called = await mcp.rpc('tools/call', {
+      name: 'france_travail_company_prospects',
+      arguments: {
+        code_rome: 'I1308',
+        citycode: '38185',
+        distance: 25,
+        page: 1,
+        page_size: 20,
+        sort_by: 'romes.hiring_score',
+        sort_direction: 'desc'
+      }
+    });
+    assert.equal(called.result.isError, undefined);
+    const payload = called.result.structuredContent;
+    assert.equal(payload.source, 'France Travail - La Bonne Boîte v2');
+    assert.equal(payload.hits, 1);
+    assert.equal(payload.companies[0].company_name, 'ENTREPRISE TEST CVC');
+    assert.equal(payload.companies[0].siret, '12345678901234');
+    assert.deepEqual(payload.query_normalization.resolved_rome_codes, ['I1308']);
+
+    const gatewayCall = recorder.calls.find((entry) => entry.url.includes('api.francetravail.io/partenaire/labonneboite/v2/search/'));
+    assert.ok(gatewayCall);
+    const gatewayUrl = new URL(gatewayCall.url);
+    assert.deepEqual(gatewayUrl.searchParams.getAll('rome'), ['I1308']);
+    assert.deepEqual(gatewayUrl.searchParams.getAll('citycode'), ['38185']);
+    assert.equal(gatewayUrl.searchParams.get('distance'), '25');
+    assert.equal(gatewayCall.init.headers.Authorization, 'Bearer lbb-token');
+    assert.equal(gatewayCall.init.redirect, 'manual');
+
+    const redirectedCall = recorder.calls.find((entry) => entry.url.includes('labonneboite.francetravail.fr/api/v2/search/'));
+    assert.ok(redirectedCall);
+    assert.equal(redirectedCall.init.headers.Authorization, undefined);
+    assert.equal(redirectedCall.init.redirect, 'error');
+
+    const tokenCall = recorder.calls.find((entry) => entry.url.includes('entreprise.francetravail.fr'));
+    const tokenBody = new URLSearchParams(String(tokenCall.init.body));
+    assert.equal(tokenBody.get('scope'), 'api_labonneboitev2');
+  } finally {
+    recorder.restore();
+    resetFranceTravailTokenCacheForTests();
+    await mcp.clientTransport.close();
+    await mcp.server.close();
+  }
+});
+
+test('france_travail_company_prospects refuses an undocumented redirect host', async () => {
+  resetFranceTravailTokenCacheForTests();
+  const recorder = installFetchRecorder([
+    { match: 'https://entreprise.francetravail.fr/connexion/oauth2/access_token', respond: tokenResponse('lbb-token') },
+    {
+      match: 'https://api.francetravail.io/partenaire/labonneboite/v2/search/',
+      respond: async () => new Response(null, {
+        status: 302,
+        headers: { Location: 'https://example.evil.invalid/steal' }
+      })
+    }
+  ]);
+  const mcp = await createMcpRpc(franceTravailConfiguredEnv());
+  try {
+    const called = await mcp.rpc('tools/call', {
+      name: 'france_travail_company_prospects',
+      arguments: { code_rome: 'I1308', location: 'Grenoble' }
+    });
+    assert.equal(called.result.isError, true);
+    assert.equal(called.result.structuredContent.error.code, 'france_travail_redirect_refused');
+    assert.equal(recorder.calls.some((entry) => entry.url.includes('example.evil.invalid')), false);
+  } finally {
+    recorder.restore();
+    resetFranceTravailTokenCacheForTests();
+    await mcp.clientTransport.close();
+    await mcp.server.close();
+  }
+});
+
+test('france_travail_company_prospects normalizes free text with ROMEO before La Bonne Boîte', async () => {
+  resetFranceTravailTokenCacheForTests();
+  const recorder = installFetchRecorder([
+    { match: 'https://entreprise.francetravail.fr/connexion/oauth2/access_token', respond: tokenResponse('lbb-romeo-token') },
+    {
+      match: 'https://api.francetravail.io/partenaire/romeo/v2/predictionMetiers',
+      respond: async () => new Response(JSON.stringify([{
+        identifiant: 'x',
+        metiersRome: [{ codeRome: 'I1308', libelleRome: 'Maintenance installation', scorePrediction: 0.93 }]
+      }]), { status: 200 })
+    },
+    {
+      match: 'https://api.francetravail.io/partenaire/labonneboite/v2/search/',
+      respond: async () => new Response(JSON.stringify({ hits: 0, items: [] }), { status: 200 })
+    }
+  ]);
+  const mcp = await createMcpRpc(franceTravailConfiguredEnv());
+  try {
+    const called = await mcp.rpc('tools/call', {
+      name: 'france_travail_company_prospects',
+      arguments: { query: 'technicien maintenance climatisation', location: 'Grenoble', page_size: 10 }
+    });
+    const payload = called.result.structuredContent;
+    assert.deepEqual(payload.query_normalization.resolved_rome_codes, ['I1308']);
+    const lbbCall = recorder.calls.find((entry) => entry.url.includes('/labonneboite/v2/search/'));
+    assert.ok(lbbCall);
+    const url = new URL(lbbCall.url);
+    assert.deepEqual(url.searchParams.getAll('rome'), ['I1308']);
+    assert.equal(url.searchParams.get('location'), 'Grenoble');
+    assert.equal(url.searchParams.get('page_size'), '10');
   } finally {
     recorder.restore();
     resetFranceTravailTokenCacheForTests();

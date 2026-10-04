@@ -11,10 +11,12 @@
 //     (client_id, scope) dans l'isolate Cloudflare.
 //
 // L'endpoint de jeton OAuth est figÃ© cÃ´tÃ© code ; chaque endpoint d'API est
-// verrouillÃ© sur HTTPS et le domaine exact `api.francetravail.io`.
+// verrouillÃ© sur HTTPS et `api.francetravail.io`. La Bonne BoÃ®te peut suivre
+// uniquement sa redirection officielle vers `labonneboite.francetravail.fr`.
 
 const DEFAULT_TOKEN_URL = 'https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire';
 const ALLOWED_API_HOST = 'api.francetravail.io';
+const ALLOWED_LBB_REDIRECT_HOST = 'labonneboite.francetravail.fr';
 const TOKEN_SAFETY_MARGIN_MS = 60_000;
 const TOKEN_REQUEST_TIMEOUT_MS = 12_000;
 
@@ -104,7 +106,8 @@ const HIGH_LEVEL_SCOPES = Object.freeze({
   MARKET: 'api_stats-offres-demandes-emploiv1 offresetdemandesemploi',
   ACCESS_EMPLOYMENT: 'api_stats-perspectives-retour-emploiv1 retouremploi',
   TRAINING_OUTCOMES: 'api_stats-entrees-sorties-formationsv1 accesemploiDEformes',
-  ANOTEA: 'api_anoteav1'
+  ANOTEA: 'api_anoteav1',
+  LBB: 'api_labonneboitev2'
 });
 
 const HIGH_LEVEL_ENDPOINTS = Object.freeze({
@@ -118,7 +121,8 @@ const HIGH_LEVEL_ENDPOINTS = Object.freeze({
   ACCESS_EMPLOYMENT: 'https://api.francetravail.io/partenaire/stats-perspectives-retour-emploi/v1/indicateur/stat-acces-emploi',
   TRAINING_ACCESS: 'https://api.francetravail.io/partenaire/stats-entrees-sorties-formations/v1/indicateur/stat-acces-emploi-sorties-formation',
   TRAINING_EXITS: 'https://api.francetravail.io/partenaire/stats-entrees-sorties-formations/v1/indicateur/stat-demandeurs-sorties-formation',
-  ANOTEA_REVIEWS: 'https://api.francetravail.io/partenaire/anotea/v1/avis'
+  ANOTEA_REVIEWS: 'https://api.francetravail.io/partenaire/anotea/v1/avis',
+  LBB_SEARCH: 'https://api.francetravail.io/partenaire/labonneboite/v2/search/'
 });
 
 const responseCache = new Map();
@@ -583,7 +587,8 @@ export function resetFranceTravailTokenCacheForTests() {
 // (par exemple pour un nouveau scÃ©nario MCP) en bÃ©nÃ©ficiant gratuitement de :
 //   - la mise en cache OAuth2 client_credentials dans `tokenCaches` (clÃ©
 //     `clientId|scope`) avec invalidation et renouvellement sur 401 ;
-//   - la validation stricte de l'hÃ´te (`https://api.francetravail.io` uniquement) ;
+//   - la validation stricte de l'hÃ´te initial (`https://api.francetravail.io`) ;
+//   - une allowlist explicite pour les rares redirections documentÃ©es ;
 //   - un timeout AbortController configurable (par dÃ©faut 15 s) ;
 //   - des retries exponentiels avec jitter sur 429 / 5xx / erreurs rÃ©seau.
 // ---------------------------------------------------------------------------
@@ -733,7 +738,8 @@ export class FranceTravailClient {
     query,
     signal,
     timeoutMs,
-    preflight
+    preflight,
+    allowedRedirectHosts = []
   } = {}) {
     if (!url || typeof url !== 'string') {
       throw new FranceTravailApiError(
@@ -780,7 +786,16 @@ export class FranceTravailClient {
       ...headers
     };
 
-    const init = { method: upperMethod, headers: finalHeaders };
+    const redirectHosts = new Set(
+      (Array.isArray(allowedRedirectHosts) ? allowedRedirectHosts : [])
+        .map((host) => String(host || '').trim().toLowerCase())
+        .filter(Boolean)
+    );
+    const init = {
+      method: upperMethod,
+      headers: finalHeaders,
+      ...(redirectHosts.size ? { redirect: 'manual' } : {})
+    };
     if (body !== undefined && body !== null) {
       init.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
@@ -806,8 +821,41 @@ export class FranceTravailClient {
 
       let response;
       let payload;
+      let effectiveUrl = parsedUrl.toString();
       try {
-        response = await this._doFetch(parsedUrl.toString(), init);
+        response = await this._doFetch(effectiveUrl, init);
+        if (redirectHosts.size && [301, 302, 303, 307, 308].includes(response.status)) {
+          const location = response.headers.get('Location') || response.headers.get('location');
+          if (!location) {
+            throw new FranceTravailApiError(
+              'france_travail_redirect_missing',
+              'France Travail a renvoyé une redirection sans destination.',
+              502,
+              { endpoint: effectiveUrl }
+            );
+          }
+          const redirected = new URL(location, effectiveUrl);
+          if (redirected.protocol !== 'https:' || !redirectHosts.has(redirected.hostname.toLowerCase())) {
+            throw new FranceTravailApiError(
+              'france_travail_redirect_refused',
+              'Redirection France Travail refusée par la liste blanche.',
+              502,
+              { endpoint: effectiveUrl, redirect_host: redirected.hostname }
+            );
+          }
+          const redirectHeaders = { ...finalHeaders };
+          delete redirectHeaders.Authorization;
+          delete redirectHeaders.authorization;
+          const redirectInit = {
+            ...init,
+            method: response.status === 303 ? 'GET' : upperMethod,
+            headers: redirectHeaders,
+            redirect: 'error'
+          };
+          if (response.status === 303) delete redirectInit.body;
+          effectiveUrl = redirected.toString();
+          response = await this._doFetch(effectiveUrl, redirectInit);
+        }
         payload = await parseResponsePayload(response);
       } catch (error) {
         clearTimeout(timeoutId);
@@ -881,7 +929,7 @@ export class FranceTravailClient {
         status: response.status,
         ok: response.ok,
         headers: response.headers,
-        url: parsedUrl.toString(),
+        url: effectiveUrl,
         data: payload
       };
     }
@@ -953,14 +1001,23 @@ async function highLevelRequest(env, {
   body,
   rateKey,
   requestsPerSecond,
-  cacheTtlMs
+  cacheTtlMs,
+  allowedRedirectHosts = [],
+  repeatQueryArrays = false
 }) {
   const parsed = safeParseUrl(endpoint, rateKey || 'high-level');
   const queryObject = query && typeof query === 'object' ? query : null;
   if (queryObject) {
     for (const [key, value] of Object.entries(queryObject)) {
       if (value === undefined || value === null || value === '') continue;
-      parsed.searchParams.set(key, Array.isArray(value) ? value.join(',') : String(value));
+      if (Array.isArray(value) && repeatQueryArrays) {
+        for (const item of value) {
+          if (item === undefined || item === null || item === '') continue;
+          parsed.searchParams.append(key, String(item));
+        }
+      } else {
+        parsed.searchParams.set(key, Array.isArray(value) ? value.join(',') : String(value));
+      }
     }
   }
   const finalUrl = parsed.toString();
@@ -976,8 +1033,8 @@ async function highLevelRequest(env, {
     maxRetries: 1
   });
   const result = upperMethod === 'POST'
-    ? await client.postJson({ url: finalUrl, scope, body })
-    : await client.getJson({ url: finalUrl, scope });
+    ? await client.postJson({ url: finalUrl, scope, body, allowedRedirectHosts })
+    : await client.getJson({ url: finalUrl, scope, allowedRedirectHosts });
   const value = {
     data: result.data,
     status: result.status,
@@ -1118,6 +1175,179 @@ export async function franceTravailJobsSearch(env, input = {}) {
     content_range: result.content_range,
     offers: extractOffers(result.data),
     data: result.data,
+    warnings
+  };
+}
+
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return uniqueStrings(value);
+  const normalized = String(value || '').trim();
+  return normalized ? [normalized] : [];
+}
+
+function buildLbbSearchParams(input, romeCodes, fallbackJob) {
+  const params = {};
+  if (romeCodes.length) params.rome = romeCodes;
+  else if (input.job) params.job = String(input.job).trim();
+  else if (fallbackJob) params.job = fallbackJob;
+
+  const listFields = [
+    'domain',
+    'granddomain',
+    'naf',
+    'city',
+    'citycode',
+    'postcode',
+    'department',
+    'department_number',
+    'region',
+    'region_number'
+  ];
+  for (const field of listFields) {
+    const values = normalizeStringList(input[field]);
+    if (values.length) params[field] = values;
+  }
+
+  if (input.location) params.location = String(input.location).trim();
+  if (input.latitude !== undefined) params.latitude = input.latitude;
+  if (input.longitude !== undefined) params.longitude = input.longitude;
+  if (input.bbox) params.bbox = String(input.bbox).trim();
+  if (input.distance !== undefined) params.distance = input.distance;
+  params.page = Math.max(1, Number(input.page) || 1);
+  params.page_size = Math.min(100, Math.max(1, Number(input.page_size) || 20));
+  if (input.sort_by) params.sort_by = String(input.sort_by);
+  if (input.sort_direction) params.sort_direction = String(input.sort_direction);
+  return params;
+}
+
+function validateLbbSearchInput(input, hasJobCriterion) {
+  if (!hasJobCriterion) {
+    throw new FranceTravailApiError(
+      'france_travail_lbb_job_missing',
+      'La Bonne Boîte requiert un métier : query, code ROME, job, domain, granddomain ou naf.',
+      400
+    );
+  }
+  const hasLatitude = input.latitude !== undefined && input.latitude !== null;
+  const hasLongitude = input.longitude !== undefined && input.longitude !== null;
+  const hasDistance = input.distance !== undefined && input.distance !== null;
+  const hasCityCode = normalizeStringList(input.citycode).length > 0;
+  const hasDepartment = normalizeStringList(input.department).length > 0
+    || normalizeStringList(input.department_number).length > 0;
+
+  if (hasLatitude !== hasLongitude) {
+    throw new FranceTravailApiError(
+      'france_travail_lbb_coordinates_incomplete',
+      'latitude et longitude doivent être fournies ensemble.',
+      400
+    );
+  }
+  if ((hasLatitude || hasLongitude) && !hasDistance) {
+    throw new FranceTravailApiError(
+      'france_travail_lbb_distance_missing',
+      'Une recherche par coordonnées nécessite aussi distance.',
+      400
+    );
+  }
+  if (hasDistance && !(hasCityCode || (hasLatitude && hasLongitude))) {
+    throw new FranceTravailApiError(
+      'france_travail_lbb_distance_without_origin',
+      'distance doit être associée à citycode ou au couple latitude/longitude.',
+      400
+    );
+  }
+  if (hasDistance && hasDepartment) {
+    throw new FranceTravailApiError(
+      'france_travail_lbb_distance_with_department',
+      'La Bonne Boîte ne permet pas de combiner distance avec une liste de départements.',
+      400
+    );
+  }
+}
+
+export async function franceTravailCompanyProspects(env, input = {}) {
+  defaultPreflight(env);
+  const query = String(input.query || '').trim();
+  const context = String(input.context || '').trim();
+  const requestedRomeCodes = uniqueStrings([
+    ...normalizeStringList(input.rome_codes),
+    input.code_rome
+  ]);
+  let resolvedRomeCodes = requestedRomeCodes;
+  let romeoPredictions = [];
+  const warnings = [];
+
+  const explicitJobCriterion = Boolean(
+    input.job
+    || normalizeStringList(input.domain).length
+    || normalizeStringList(input.granddomain).length
+    || normalizeStringList(input.naf).length
+    || requestedRomeCodes.length
+  );
+
+  if (!explicitJobCriterion && query) {
+    try {
+      const prediction = await predictRomeJobs(env, query, context, 3);
+      resolvedRomeCodes = prediction.codes.slice(0, 3);
+      romeoPredictions = prediction.predictions;
+      if (!resolvedRomeCodes.length) {
+        warnings.push('ROMEO n’a retourné aucun code ROME exploitable ; La Bonne Boîte utilisera la recherche libre job.');
+      }
+    } catch (error) {
+      warnings.push(`ROMEO indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'} ; La Bonne Boîte utilisera la recherche libre job.`);
+    }
+  }
+
+  const hasJobCriterion = Boolean(
+    resolvedRomeCodes.length
+    || input.job
+    || query
+    || normalizeStringList(input.domain).length
+    || normalizeStringList(input.granddomain).length
+    || normalizeStringList(input.naf).length
+  );
+  validateLbbSearchInput(input, hasJobCriterion);
+
+  const params = buildLbbSearchParams(
+    input,
+    resolvedRomeCodes,
+    resolvedRomeCodes.length ? '' : query
+  );
+
+  const result = await highLevelRequest(env, {
+    endpoint: HIGH_LEVEL_ENDPOINTS.LBB_SEARCH,
+    scope: HIGH_LEVEL_SCOPES.LBB,
+    query: params,
+    rateKey: 'la-bonne-boite',
+    requestsPerSecond: 2,
+    cacheTtlMs: 6 * 60 * 60 * 1000,
+    allowedRedirectHosts: [ALLOWED_LBB_REDIRECT_HOST],
+    repeatQueryArrays: true
+  });
+
+  const data = result.data && typeof result.data === 'object' ? result.data : {};
+  const companies = Array.isArray(data.items) ? data.items : [];
+  return {
+    source: 'France Travail - La Bonne Boîte v2',
+    fetched_at: new Date().toISOString(),
+    update_frequency: 'monthly',
+    query_normalization: {
+      original_query: query || null,
+      context: context || null,
+      requested_rome_codes: requestedRomeCodes,
+      resolved_rome_codes: resolvedRomeCodes,
+      romeo_predictions: romeoPredictions
+    },
+    request: {
+      page: params.page,
+      page_size: params.page_size,
+      filters: params
+    },
+    hits: Number.isFinite(Number(data.hits)) ? Number(data.hits) : null,
+    companies,
+    resolved_params: data.resolved_params || null,
+    data,
     warnings
   };
 }

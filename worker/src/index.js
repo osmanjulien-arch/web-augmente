@@ -9,10 +9,11 @@ import {
   franceTravailJobsSearch,
   franceTravailJobAnalyze,
   franceTravailMarketAnalysis,
-  franceTravailTrainingAnalysis
+  franceTravailTrainingAnalysis,
+  franceTravailCompanyProspects
 } from './france-travail.js';
 
-const API_VERSION = '0.3.0';
+const API_VERSION = '0.4.0';
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_CONTENT_CHARS = 40000;
 const MAX_SELECTION_CHARS = 20000;
@@ -895,6 +896,38 @@ function createWebAugmenteMcpServer(env) {
     }).strict(),
     annotations: franceTravailReadOnlyAnnotations
   }, async (input) => callFranceTravailTool(() => franceTravailJobsSearch(env, input)));
+
+  server.registerTool('france_travail_company_prospects', {
+    title: 'Trouver des entreprises à prospecter avec La Bonne Boîte',
+    description: 'Recherche le marché caché via La Bonne Boîte v2 : entreprises susceptibles de recruter dans les 6 prochains mois. Un texte libre peut être normalisé par ROMEO vers des codes ROME. Les résultats sont distincts des offres publiées et servent à la prospection directe.',
+    inputSchema: z.object({
+      query: z.string().min(2).max(500).optional(),
+      context: z.string().max(500).optional(),
+      code_rome: z.string().min(2).max(20).optional(),
+      rome_codes: z.array(z.string().min(2).max(20)).max(20).optional(),
+      job: z.string().min(1).max(200).optional(),
+      domain: z.union([z.string(), z.array(z.string())]).optional(),
+      granddomain: z.union([z.string(), z.array(z.string())]).optional(),
+      naf: z.union([z.string(), z.array(z.string())]).optional(),
+      location: z.string().max(200).optional(),
+      city: z.union([z.string(), z.array(z.string())]).optional(),
+      citycode: z.union([z.string(), z.array(z.string())]).optional(),
+      postcode: z.union([z.string(), z.array(z.string())]).optional(),
+      department: z.union([z.string(), z.array(z.string())]).optional(),
+      department_number: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]).optional(),
+      region: z.union([z.string(), z.array(z.string())]).optional(),
+      region_number: z.union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))]).optional(),
+      latitude: z.number().min(-90).max(90).optional(),
+      longitude: z.number().min(-180).max(180).optional(),
+      bbox: z.string().max(120).optional(),
+      distance: z.number().int().min(1).max(199).optional(),
+      page: z.number().int().min(1).default(1),
+      page_size: z.number().int().min(1).max(100).default(20),
+      sort_by: z.enum(['romes.hiring_score', 'hiring_score', 'distance']).optional(),
+      sort_direction: z.enum(['asc', 'desc']).optional()
+    }).strict(),
+    annotations: franceTravailReadOnlyAnnotations
+  }, async (input) => callFranceTravailTool(() => franceTravailCompanyProspects(env, input)));
 
   server.registerTool('france_travail_job_analyze', {
     title: 'Analyser une offre France Travail',
