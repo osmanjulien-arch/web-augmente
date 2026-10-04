@@ -9,13 +9,19 @@ Le Worker Cloudflare `web-augmente-api` conserve l’API historique du userscrip
 - `POST /mcp` : transport MCP Streamable HTTP, protégé par OAuth 2.1 ;
 - `/authorize`, `/oauth/token`, `/oauth/register` et `/.well-known/*` : autorisation et découverte OAuth.
 
-Le MCP expose maintenant trois outils en lecture seule :
+Le MCP expose maintenant sept outils en lecture seule :
 
 - `wa_get_last_page` lit directement `meta:last_page` dans `WA_MEMORY` et signale explicitement que le texte capturé est du contenu Web non fiable ;
-- `france_travail_events_status` vérifie si la connexion API France Travail est configurée sans exposer les secrets ;
-- `france_travail_events_search` interroge l’API officielle **Mes Evènements Emploi** avec les filtres transmis par le client MCP.
+- `france_travail_events_status` vérifie la configuration de l’API historique **Mes Evènements Emploi** sans exposer les secrets ;
+- `france_travail_events_search` interroge **Mes Evènements Emploi** ;
+- `france_travail_jobs_search` normalise si nécessaire une requête libre via **ROMEO v2**, puis recherche les offres **Offres d’emploi v2** par codes ROME ou filtres ;
+- `france_travail_job_analyze` récupère le détail d’une offre et l’enrichit avec sa **fiche métier ROME 4.0** lorsqu’un code ROME est disponible ;
+- `france_travail_market_analysis` croise un métier ROME avec **Marché du travail** et **Accès à l’emploi**, avec difficulté de recrutement et salaires en option ;
+- `france_travail_training_analysis` croise le métier avec **Sortants de formation**, **Anotéa** quand une formation est ciblée, et le marché du travail. Cet outil n’est pas un catalogue exhaustif des formations financées.
 
-L’intégration France Travail utilise OAuth 2.0 `client_credentials`. Le jeton est obtenu côté Worker, gardé uniquement en mémoire de l’isolate jusqu’à expiration et renouvelé automatiquement. Les identifiants France Travail ne transitent jamais vers ChatGPT.
+L’intégration France Travail utilise OAuth 2.0 `client_credentials`. Les mêmes `FRANCE_TRAVAIL_CLIENT_ID` et `FRANCE_TRAVAIL_CLIENT_SECRET` servent à obtenir des jetons distincts par scope ; le cache OAuth est indexé par `(client_id, scope)`. Les identifiants, jetons et secrets ne transitent jamais vers ChatGPT.
+
+Les nouveaux outils haut niveau utilisent des endpoints et scopes officiels vérifiés côté code. Le Worker impose HTTPS et l’hôte exact `api.francetravail.io`, applique un timeout, renouvelle une fois le jeton sur HTTP 401, et utilise un cache de réponses ainsi qu’un throttling **best effort par isolate Cloudflare**. Ce throttling réduit les appels inutiles mais ne constitue pas un limiteur global distribué.
 
 ## Stockage
 
@@ -70,6 +76,21 @@ FRANCE_TRAVAIL_EVENTS_URL=https://api.francetravail.io/<chemin de l'API Mes Evè
 ```
 
 Le Worker verrouille `FRANCE_TRAVAIL_EVENTS_URL` sur HTTPS et le domaine exact `api.francetravail.io`. Si une variable manque, `france_travail_events_status` l’indique et les fonctions Web Augmenté existantes continuent de fonctionner normalement.
+
+### APIs France Travail utilisées par les outils haut niveau
+
+Aucune variable Cloudflare supplémentaire n’est nécessaire : les endpoints/scopes vérifiés sont fixés côté code et les mêmes identifiants France Travail sont utilisés pour demander le jeton correspondant à chaque scope.
+
+- **Offres d’emploi v2** : recherche et détail des offres ;
+- **ROMEO v2** : rapprochement d’un texte libre avec des métiers ROME ;
+- **ROME 4.0 – Fiches métiers** : enrichissement métier ;
+- **Marché du travail** + **Accès à l’emploi** : statistiques métier/territoire ;
+- **Sortants de formation et accès à l’emploi** : résultats après formation ;
+- **Anotéa** : avis lorsque `certif_info`, `formacode`, code postal ou organisme est fourni.
+
+**La Bonne Boîte v2** et **Synthèse Pages employeurs v1** ne sont volontairement pas branchées dans cette version : les sous-scopes/endpoint nécessaires n’ont pas été validés en exécution. Aucun endpoint n’est deviné.
+
+Le cache de réponses est volontairement court pour les offres (45 s), plus long pour ROMEO/ROME/statistiques, et reste local à l’isolate. Les quotas officiels vus dans le portail sont respectés côté orchestration : Offres 10/s, ROMEO 3/s, fiches ROME 1/s, Marché/Accès/Sortants 10/s et Anotéa 8/s.
 
 Le point d’obtention du jeton est fixé côté code à :
 
@@ -155,7 +176,7 @@ D’après la [documentation officielle OpenAI](https://developers.openai.com/pl
 1. Dans ChatGPT, ouvrir **Settings** → **Security and login**, puis activer **Developer mode**.
 2. Ouvrir **ChatGPT Plugins**, sélectionner le bouton **+**, puis saisir un nom et une description.
 3. Dans **Connection**, choisir l’endpoint public et saisir l’URL MCP complète terminant par `/mcp`.
-4. Créer la connexion, terminer l’écran OAuth avec le secret personnel, puis vérifier que seul `wa_get_last_page` est découvert.
+4. Créer la connexion, terminer l’écran OAuth avec le secret personnel, puis vérifier que les sept outils listés plus haut sont découverts.
 5. Dans une nouvelle conversation, ajouter cette connexion depuis le menu des outils.
 
 La disponibilité du mode développeur peut dépendre du compte et de la politique du workspace.
