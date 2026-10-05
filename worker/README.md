@@ -35,6 +35,28 @@ Les deux IDs sont inscrits explicitement dans `wrangler.jsonc`. Ne jamais suppri
 
 ## Développement et validation
 
+### Fiabilité des analyses France Travail
+
+Les analyses marché et formation exposent `status: "ok" | "partial" | "unavailable"`.
+Une analyse entièrement indisponible porte aussi `isError: true` dans sa réponse MCP.
+Les données utiles restent présentes en cas d'échec partiel ; `section_errors`
+conserve le code, le statut HTTP et l'endpoint sans query string pour chaque section
+en échec. Les corps d'erreur HTTP amont ne sont pas réexposés.
+
+Anotéa ne propose pas de filtre ROME. `anotea_context` donne les filtres envoyés,
+`rome_filter_applied: false` et le périmètre (`formation`, `organisme`,
+`geographique`, ou `null` si aucun filtre). Même avec un filtre de formation,
+le lien au métier ROME n'est pas établi par cet outil. Un code postal seul renvoie
+des avis de tous les domaines locaux. Les filtres vides après suppression des
+espaces ne déclenchent jamais une interrogation globale d'Anotéa.
+
+Un HTTP 403 utilise `france_travail_forbidden` et invite à vérifier souscription,
+scopes et droits. Cette classification ne rétablit pas à elle seule l'accès.
+Les paramètres de période et de nomenclature sont également transmis à l'analyse
+marché imbriquée dans l'analyse formation.
+
+`npm test` exécute les régressions du client puis les tests MCP/OAuth dans Workers.
+
 ```bash
 cd worker
 npm ci

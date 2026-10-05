@@ -654,13 +654,16 @@ function safeParseUrl(url, label) {
 }
 
 function mapUpstreamError(response, payload, url) {
-  const upstreamMessage = payload?.message
-    || payload?.error_description
-    || payload?.error
-    || `Erreur HTTP ${response.status} renvoyÃ©e par France Travail.`;
+  // Do not return arbitrary upstream bodies: they may echo request credentials.
+  const code = response.status === 403 ? 'france_travail_forbidden'
+    : response.status === 401 ? 'france_travail_unauthorized'
+    : 'france_travail_request_failed';
+  const message = response.status === 403
+    ? 'Accès refusé par France Travail (HTTP 403). Vérifier la souscription à cette API, les scopes et les droits de l’application.'
+    : `Erreur HTTP ${response.status} renvoyée par France Travail.`;
   return new FranceTravailApiError(
-    'france_travail_request_failed',
-    String(upstreamMessage),
+    code,
+    message,
     response.status,
     { endpoint: url, upstream_status: response.status }
   );
@@ -1447,11 +1450,25 @@ function buildStatsCriteria(input = {}) {
   return criteria;
 }
 
-function settledData(name, settled, warnings) {
+function settledData(name, settled, warnings, sectionErrors) {
   if (settled.status === 'fulfilled') return settled.value.data;
   const error = settled.reason;
-  warnings.push(`${name} indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'}.`);
+  const known = error instanceof FranceTravailApiError;
+  const diagnostic = {
+    code: known ? error.code : 'france_travail_internal_error',
+    status: known ? error.status : 500,
+    upstream_status: known ? error.details?.upstream_status ?? null : null,
+    endpoint: known ? error.details?.endpoint?.split('?')[0] ?? null : null
+  };
+  sectionErrors[name] = diagnostic;
+  warnings.push(`${name} indisponible : ${diagnostic.code} (HTTP ${diagnostic.status}).`);
   return null;
+}
+
+function analysisStatus(sections, sectionErrors) {
+  const available = Object.values(sections).some(value => value !== null && value !== undefined);
+  if (!available) return 'unavailable';
+  return Object.keys(sectionErrors).length ? 'partial' : 'ok';
 }
 
 export async function franceTravailMarketAnalysis(env, input = {}) {
@@ -1503,25 +1520,33 @@ export async function franceTravailMarketAnalysis(env, input = {}) {
   const results = await Promise.allSettled(calls.map(([, promise]) => promise));
   const warnings = [];
   const sections = {};
+  const sectionErrors = {};
   results.forEach((result, index) => {
-    sections[calls[index][0]] = settledData(calls[index][0], result, warnings);
+    sections[calls[index][0]] = settledData(calls[index][0], result, warnings, sectionErrors);
   });
   return {
     source: "France Travail - MarchÃ© du travail et accÃ¨s Ã  l'emploi",
+    status: analysisStatus(sections, sectionErrors),
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
     criteria,
     sections,
+    section_errors: sectionErrors,
     warnings
   };
 }
 
 function buildAnoteaQuery(input = {}) {
   const query = {};
-  if (input.organisme_formateur) query.organisme_formateur = String(input.organisme_formateur).trim();
-  if (input.formacode) query.formacode = String(input.formacode).trim();
-  if (input.certif_info) query.certif_info = String(input.certif_info).trim();
-  if (input.postcode) query.lieu_de_formation = String(input.postcode).trim();
+  for (const [key, value] of Object.entries({
+    organisme_formateur: input.organisme_formateur,
+    formacode: input.formacode,
+    certif_info: input.certif_info,
+    lieu_de_formation: input.postcode
+  })) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) query[key] = normalized;
+  }
   query.page = Math.max(0, Number(input.page) || 0);
   query.items_par_page = Math.min(200, Math.max(1, Number(input.items_per_page) || 50));
   return query;
@@ -1554,12 +1579,21 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
     })]
   ];
 
-  const hasAnoteaFilter = Boolean(input.organisme_formateur || input.formacode || input.certif_info || input.postcode);
+  const anoteaQuery = buildAnoteaQuery(input);
+  const { page, items_par_page, ...anoteaFilters } = anoteaQuery;
+  const hasAnoteaFilter = Object.keys(anoteaFilters).length > 0;
+  const anoteaContext = {
+    filters: anoteaFilters,
+    rome_filter_applied: false,
+    scope: anoteaFilters.certif_info || anoteaFilters.formacode ? 'formation'
+      : anoteaFilters.organisme_formateur ? 'organisme'
+      : anoteaFilters.lieu_de_formation ? 'geographique' : null
+  };
   if (hasAnoteaFilter) {
     calls.push(['anotea_reviews', highLevelRequest(env, {
       endpoint: HIGH_LEVEL_ENDPOINTS.ANOTEA_REVIEWS,
       scope: HIGH_LEVEL_SCOPES.ANOTEA,
-      query: buildAnoteaQuery(input),
+      query: anoteaQuery,
       rateKey: 'anotea',
       requestsPerSecond: 8,
       cacheTtlMs: 6 * 60 * 60 * 1000
@@ -1569,12 +1603,18 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
   const results = await Promise.allSettled(calls.map(([, promise]) => promise));
   const warnings = [];
   const sections = {};
+  const sectionErrors = {};
   results.forEach((result, index) => {
-    sections[calls[index][0]] = settledData(calls[index][0], result, warnings);
+    sections[calls[index][0]] = settledData(calls[index][0], result, warnings, sectionErrors);
   });
   if (!hasAnoteaFilter) {
     sections.anotea_reviews = null;
     warnings.push('AnotÃ©a non interrogÃ© : fournir certif_info, formacode, postcode ou organisme_formateur.');
+  } else {
+    warnings.push('Les avis Anotéa sont filtrés par les critères de anotea_context, jamais par code ROME. Leur lien avec le métier demandé n’est pas établi.');
+    if (anoteaContext.scope !== 'formation') {
+      warnings.push('Sans certif_info ou formacode, les avis couvrent plusieurs domaines de formation : ne pas les utiliser pour évaluer ce métier.');
+    }
   }
 
   let market = null;
@@ -1584,19 +1624,30 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
         rome_code: criteria.codeActivite,
         territory: input.territory,
         include_difficulty: Boolean(input.include_difficulty),
-        include_salary: Boolean(input.include_salary)
+        include_salary: Boolean(input.include_salary),
+        nomenclature_type: input.nomenclature_type,
+        nomenclature_codes: input.nomenclature_codes,
+        period_codes: input.period_codes,
+        without_characteristics: input.without_characteristics
       });
+      if (market.status !== 'ok') warnings.push(`Analyse marché ${market.status} : consulter market.section_errors.`);
     } catch (error) {
-      warnings.push(`Analyse marchÃ© indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'}.`);
+      settledData('market', { status: 'rejected', reason: error }, warnings, sectionErrors);
     }
   }
 
+  const combinedSections = market ? { ...sections, ...market.sections } : sections;
+  const combinedErrors = market ? { ...sectionErrors, ...market.section_errors } : sectionErrors;
+
   return {
     source: "France Travail - formation, dÃ©bouchÃ©s et avis",
+    status: analysisStatus(combinedSections, combinedErrors),
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
     criteria,
     sections,
+    section_errors: sectionErrors,
+    anotea_context: anoteaContext,
     market,
     warnings
   };

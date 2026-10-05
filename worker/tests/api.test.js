@@ -1022,6 +1022,28 @@ test('france_travail_market_analysis keeps useful data when one upstream fails',
   }
 });
 
+test('MCP flags an entirely unavailable analysis as a tool error', async () => {
+  resetFranceTravailTokenCacheForTests();
+  const recorder = installFetchRecorder([
+    { match: 'https://entreprise.francetravail.fr/connexion/oauth2/access_token', respond: tokenResponse('market-token') },
+    { match: 'https://api.francetravail.io/partenaire/stats-', respond: async () => Response.json({}, { status: 400 }) }
+  ]);
+  const mcp = await createMcpRpc(franceTravailConfiguredEnv());
+  try {
+    const called = await mcp.rpc('tools/call', {
+      name: 'france_travail_market_analysis', arguments: { rome_code: 'I1302' }
+    });
+    assert.equal(called.result.structuredContent.status, 'unavailable');
+    assert.equal(called.result.isError, true);
+    assert.equal(called.result.structuredContent.section_errors.offers_statistics.status, 400);
+  } finally {
+    recorder.restore();
+    resetFranceTravailTokenCacheForTests();
+    await mcp.clientTransport.close();
+    await mcp.server.close();
+  }
+});
+
 test('france_travail_training_analysis combines outcomes and Anotea', async () => {
   resetFranceTravailTokenCacheForTests();
   const recorder = installFetchRecorder([

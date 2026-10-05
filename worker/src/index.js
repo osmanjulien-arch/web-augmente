@@ -830,6 +830,7 @@ function createWebAugmenteMcpServer(env) {
     try {
       const result = await callback();
       return {
+        ...(result.status === 'unavailable' ? { isError: true } : {}),
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         structuredContent: result
       };
@@ -940,7 +941,7 @@ function createWebAugmenteMcpServer(env) {
 
   server.registerTool('france_travail_market_analysis', {
     title: 'Analyser le marchÃ© dâ€™un mÃ©tier France Travail',
-    description: 'Croise un code ROME avec les statistiques officielles du marchÃ© du travail et dâ€™accÃ¨s Ã  lâ€™emploi. Le territoire est optionnel et doit Ãªtre fourni sous forme de type/code France Travail.',
+    description: 'Croise un code ROME avec les statistiques officielles du marché du travail et d’accès à l’emploi. Le territoire utilise les codes France Travail. status indique ok, partial ou unavailable ; section_errors détaille les échecs HTTP sans remplacer les données absentes par des estimations.',
     inputSchema: z.object({
       rome_code: z.string().min(2).max(20),
       territory: franceTravailTerritory.optional(),
@@ -956,7 +957,7 @@ function createWebAugmenteMcpServer(env) {
 
   server.registerTool('france_travail_training_analysis', {
     title: 'Analyser une formation et ses dÃ©bouchÃ©s France Travail',
-    description: 'Croise un mÃ©tier ROME avec les statistiques de sortie de formation, lâ€™accÃ¨s Ã  lâ€™emploi, le marchÃ© local et, lorsquâ€™un identifiant de formation est fourni, les avis AnotÃ©a. Cet outil nâ€™est pas un catalogue exhaustif des formations financÃ©es.',
+    description: 'Croise un métier ROME avec les statistiques de sortie de formation et le marché local. Les avis Anotéa sont filtrés par certif_info, formacode, code postal ou SIRET de l’organisme, jamais par ROME ; anotea_context précise leur périmètre. Un code postal seul couvre tous les domaines locaux. status et section_errors signalent les données indisponibles. Cet outil n’est pas un catalogue exhaustif des formations financées.',
     inputSchema: z.object({
       rome_code: z.string().min(2).max(20),
       territory: franceTravailTerritory.optional(),
