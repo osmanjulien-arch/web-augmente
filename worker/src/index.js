@@ -10,10 +10,11 @@ import {
   franceTravailJobAnalyze,
   franceTravailMarketAnalysis,
   franceTravailTrainingAnalysis,
+  franceTravailStatsReference,
   franceTravailCompanyProspects
 } from './france-travail.js';
 
-const API_VERSION = '0.4.0';
+const API_VERSION = '0.5.0';
 const MAX_REQUEST_BYTES = 256 * 1024;
 const MAX_CONTENT_CHARS = 40000;
 const MAX_SELECTION_CHARS = 20000;
@@ -941,7 +942,7 @@ function createWebAugmenteMcpServer(env) {
 
   server.registerTool('france_travail_market_analysis', {
     title: 'Analyser le marchÃ© dâ€™un mÃ©tier France Travail',
-    description: 'Croise un code ROME avec les statistiques officielles du marché du travail et d’accès à l’emploi. Le territoire utilise les codes France Travail. status indique ok, partial ou unavailable ; section_errors détaille les échecs HTTP sans remplacer les données absentes par des estimations.',
+    description: 'Croise un code ROME avec les statistiques officielles du marché et d’accès à l’emploi. Sans territoire, utilise NAT/FR (France). Nomenclatures par défaut : ORIGINEOFF pour les offres, DUREEEMP pour l’accès à l’emploi, TYPE_TENSION et période annuelle pour les tensions. nomenclature_type/codes ciblent les offres ; access_nomenclature_type/codes ciblent l’accès. difficulty_period_codes accepte des années. Les salaires utilisent un GET par territoire et ROME. section_criteria précise chaque requête ; section_errors détaille les échecs.',
     inputSchema: z.object({
       rome_code: z.string().min(2).max(20),
       territory: franceTravailTerritory.optional(),
@@ -950,6 +951,9 @@ function createWebAugmenteMcpServer(env) {
       nomenclature_type: z.string().max(40).optional(),
       period_codes: z.union([z.string(), z.array(z.string())]).optional(),
       nomenclature_codes: z.union([z.string(), z.array(z.string())]).optional(),
+      access_nomenclature_type: z.string().max(40).optional(),
+      access_nomenclature_codes: z.union([z.string(), z.array(z.string())]).optional(),
+      difficulty_period_codes: z.union([z.string(), z.array(z.string())]).optional(),
       without_characteristics: z.boolean().optional()
     }).strict(),
     annotations: franceTravailReadOnlyAnnotations
@@ -957,9 +961,10 @@ function createWebAugmenteMcpServer(env) {
 
   server.registerTool('france_travail_training_analysis', {
     title: 'Analyser une formation et ses dÃ©bouchÃ©s France Travail',
-    description: 'Croise un métier ROME avec les statistiques de sortie de formation et le marché local. Les avis Anotéa sont filtrés par certif_info, formacode, code postal ou SIRET de l’organisme, jamais par ROME ; anotea_context précise leur périmètre. Un code postal seul couvre tous les domaines locaux. status et section_errors signalent les données indisponibles. Cet outil n’est pas un catalogue exhaustif des formations financées.',
+    description: 'Croise un métier ROME avec les sorties de formation et le marché. Sans territoire, utilise NAT/FR. Le taux d’accès à l’emploi après formation nécessite training_activity : type et code du référentiel formation (consulter france_travail_stats_reference). Ne pas confondre ce domaine avec le ROME ou un formacode Anotéa. nomenclature_type/codes ciblent ce taux, avec ACCESEMP par défaut ; sorties et marché conservent leurs propres critères. Les avis Anotéa ne sont jamais filtrés par ROME. section_criteria et not_requested précisent le périmètre. Ce n’est pas un catalogue exhaustif des formations financées.',
     inputSchema: z.object({
       rome_code: z.string().min(2).max(20),
+      training_activity: z.object({ type: z.string().min(1).max(40), code: z.string().min(1).max(40) }).strict().optional(),
       territory: franceTravailTerritory.optional(),
       certif_info: z.string().max(80).optional(),
       formacode: z.string().max(80).optional(),
@@ -977,6 +982,18 @@ function createWebAugmenteMcpServer(env) {
     }).strict(),
     annotations: franceTravailReadOnlyAnnotations
   }, async (input) => callFranceTravailTool(() => franceTravailTrainingAnalysis(env, input)));
+
+  server.registerTool('france_travail_stats_reference', {
+    title: 'Consulter les référentiels statistiques France Travail',
+    description: 'Consulte les codes officiels et croisements disponibles pour les statistiques marché, accès à l’emploi ou formation. Pour obtenir les domaines de formation utilisables dans training_activity : api=training, resource=activities, type_code=FORM14. indicator_catalogue permet de vérifier les activités, territoires et nomenclatures de chaque indicateur.',
+    inputSchema: z.object({
+      api: z.enum(['market', 'access', 'training']),
+      resource: z.enum(['indicator_catalogue', 'activity_types', 'activities', 'nomenclature_types', 'nomenclatures', 'period_types', 'periods', 'territory_types', 'territories']),
+      type_code: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional(),
+      indicator_code: z.string().regex(/^[A-Za-z0-9_-]{1,40}$/).optional()
+    }).strict(),
+    annotations: franceTravailReadOnlyAnnotations
+  }, async input => callFranceTravailTool(() => franceTravailStatsReference(env, input)));
 
   server.registerTool('wa_get_last_page', {
     title: 'Lire la derniÃ¨re page Web AugmentÃ©',

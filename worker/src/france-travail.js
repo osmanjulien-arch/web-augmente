@@ -107,7 +107,7 @@ const HIGH_LEVEL_SCOPES = Object.freeze({
   ACCESS_EMPLOYMENT: 'api_stats-perspectives-retour-emploiv1 retouremploi',
   TRAINING_OUTCOMES: 'api_stats-entrees-sorties-formationsv1 accesemploiDEformes',
   ANOTEA: 'api_anoteav1',
-  LBB: 'api_labonneboitev2'
+  LBB: 'api_labonneboitev2 search office'
 });
 
 const HIGH_LEVEL_ENDPOINTS = Object.freeze({
@@ -117,12 +117,12 @@ const HIGH_LEVEL_ENDPOINTS = Object.freeze({
   ROMEO_JOBS: 'https://api.francetravail.io/partenaire/romeo/v2/predictionMetiers',
   MARKET_OFFERS: 'https://api.francetravail.io/partenaire/stats-offres-demandes-emploi/v1/indicateur/stat-offres',
   MARKET_DIFFICULTY: 'https://api.francetravail.io/partenaire/stats-offres-demandes-emploi/v1/indicateur/stat-perspective-employeur',
-  MARKET_SALARY: 'https://api.francetravail.io/partenaire/stats-offres-demandes-emploi/v1/indicateur/stat-salaires-en-poste',
+  MARKET_SALARY: 'https://api.francetravail.io/partenaire/stats-offres-demandes-emploi/v1/indicateur/salaire-rome-fap/',
   ACCESS_EMPLOYMENT: 'https://api.francetravail.io/partenaire/stats-perspectives-retour-emploi/v1/indicateur/stat-acces-emploi',
   TRAINING_ACCESS: 'https://api.francetravail.io/partenaire/stats-entrees-sorties-formations/v1/indicateur/stat-acces-emploi-sorties-formation',
   TRAINING_EXITS: 'https://api.francetravail.io/partenaire/stats-entrees-sorties-formations/v1/indicateur/stat-demandeurs-sorties-formation',
   ANOTEA_REVIEWS: 'https://api.francetravail.io/partenaire/anotea/v1/avis',
-  LBB_SEARCH: 'https://api.francetravail.io/partenaire/labonneboite/v2/search/'
+  LBB_SEARCH: 'https://api.francetravail.io/partenaire/labonneboite/v2/recherche'
 });
 
 const responseCache = new Map();
@@ -1423,6 +1423,10 @@ export async function franceTravailJobAnalyze(env, input = {}) {
   };
 }
 
+function statsCodeList(value) {
+  return uniqueStrings(Array.isArray(value) ? value : String(value ?? '').split(','));
+}
+
 function buildStatsCriteria(input = {}) {
   const romeCode = String(input.rome_code || input.code_rome || '').trim();
   if (!romeCode) throw new FranceTravailApiError('france_travail_rome_code_missing', 'Code ROME requis.', 400);
@@ -1430,6 +1434,8 @@ function buildStatsCriteria(input = {}) {
     codeTypeActivite: 'ROME',
     codeActivite: romeCode,
     codeTypePeriode: 'TRIMESTRE',
+    codeTypeTerritoire: 'NAT',
+    codeTerritoire: 'FR',
     dernierePeriode: true
   };
   if (input.territory && typeof input.territory === 'object') {
@@ -1439,15 +1445,64 @@ function buildStatsCriteria(input = {}) {
       throw new FranceTravailApiError('france_travail_invalid_territory', 'Le type et le code du territoire doivent Ãªtre fournis ensemble.', 400);
     }
     if (type && code) {
-      criteria.codeTypeTerritoire = type;
+      const aliases = { DEPARTEMENT: 'DEP', REGION: 'REG', NATIONAL: 'NAT' };
+      criteria.codeTypeTerritoire = aliases[type.toUpperCase()] || type.toUpperCase();
       criteria.codeTerritoire = code;
     }
   }
-  if (input.nomenclature_type) criteria.codeTypeNomenclature = String(input.nomenclature_type).trim();
-  if (input.period_codes) criteria.listeCodePeriode = Array.isArray(input.period_codes) ? input.period_codes.join(',') : String(input.period_codes);
-  if (input.nomenclature_codes) criteria.listeCodeNomenclature = Array.isArray(input.nomenclature_codes) ? input.nomenclature_codes.join(',') : String(input.nomenclature_codes);
+  const periods = statsCodeList(input.period_codes);
+  if (periods.length) {
+    criteria.listeCodePeriode = periods;
+    criteria.dernierePeriode = false;
+  }
   if (typeof input.without_characteristics === 'boolean') criteria.sansCaracteristiques = input.without_characteristics;
   return criteria;
+}
+
+function withStatsNomenclature(criteria, type, codes) {
+  const result = { ...criteria, codeTypeNomenclature: type };
+  const list = statsCodeList(codes);
+  if (list.length) result.listeCodeNomenclature = list;
+  return result;
+}
+
+export async function franceTravailStatsReference(env, input = {}) {
+  defaultPreflight(env);
+  const apis = {
+    market: { base: 'stats-offres-demandes-emploi', scope: HIGH_LEVEL_SCOPES.MARKET, rateKey: 'market' },
+    access: { base: 'stats-perspectives-retour-emploi', scope: HIGH_LEVEL_SCOPES.ACCESS_EMPLOYMENT, rateKey: 'access-employment' },
+    training: { base: 'stats-entrees-sorties-formations', scope: HIGH_LEVEL_SCOPES.TRAINING_OUTCOMES, rateKey: 'training-outcomes' }
+  };
+  const resources = {
+    indicator_catalogue: 'details-indicateurs',
+    activity_types: 'type-activites', activities: 'activites',
+    nomenclature_types: 'type-nomenclatures', nomenclatures: 'nomenclatures',
+    period_types: 'type-periodes', periods: 'periodes',
+    territory_types: 'type-territoires', territories: 'territoires'
+  };
+  if (!Object.hasOwn(apis, input.api) || !Object.hasOwn(resources, input.resource)) {
+    throw new FranceTravailApiError('france_travail_invalid_reference', 'API ou ressource de référentiel inconnue.', 400);
+  }
+  const typeCode = String(input.type_code || '').trim();
+  const indicatorCode = String(input.indicator_code || '').trim();
+  if ((typeCode && !/^[A-Za-z0-9_-]{1,40}$/.test(typeCode)) || (indicatorCode && !/^[A-Za-z0-9_-]{1,40}$/.test(indicatorCode))) {
+    throw new FranceTravailApiError('france_travail_invalid_reference', 'Code de référentiel invalide.', 400);
+  }
+  if (typeCode && !['activities', 'nomenclatures', 'periods', 'territories'].includes(input.resource)) {
+    throw new FranceTravailApiError('france_travail_invalid_reference', 'type_code ne s’applique pas à cette ressource.', 400);
+  }
+  if (indicatorCode && input.resource !== 'indicator_catalogue') {
+    throw new FranceTravailApiError('france_travail_invalid_reference', 'indicator_code requiert indicator_catalogue.', 400);
+  }
+  const api = apis[input.api];
+  const endpoint = `https://api.francetravail.io/partenaire/${api.base}/v1/referentiel/${resources[input.resource]}${typeCode ? '/' + encodeURIComponent(typeCode) : ''}`;
+  const result = await highLevelRequest(env, {
+    endpoint, scope: api.scope,
+    query: indicatorCode ? { codeIndicateur: indicatorCode } : undefined,
+    rateKey: api.rateKey, requestsPerSecond: 10,
+    cacheTtlMs: 12 * 60 * 60 * 1000
+  });
+  return { source: 'France Travail - référentiel statistique', fetched_at: new Date().toISOString(), api: input.api, resource: input.resource, endpoint: result.endpoint, data: result.data };
 }
 
 function settledData(name, settled, warnings, sectionErrors) {
@@ -1474,12 +1529,17 @@ function analysisStatus(sections, sectionErrors) {
 export async function franceTravailMarketAnalysis(env, input = {}) {
   defaultPreflight(env);
   const criteria = buildStatsCriteria(input);
+  // Each indicator has a distinct contract. A nomenclature cannot be reused
+  // across offers, access to employment, and annual recruitment tensions.
+  const offersCriteria = withStatsNomenclature(criteria, input.nomenclature_type || 'ORIGINEOFF', input.nomenclature_codes);
+  const accessCriteria = withStatsNomenclature(criteria, input.access_nomenclature_type || 'DUREEEMP', input.access_nomenclature_codes);
+  const sectionCriteria = { offers_statistics: offersCriteria, access_to_employment: accessCriteria };
   const calls = [
     ['offers_statistics', highLevelRequest(env, {
       endpoint: HIGH_LEVEL_ENDPOINTS.MARKET_OFFERS,
       scope: HIGH_LEVEL_SCOPES.MARKET,
       method: 'POST',
-      body: criteria,
+      body: offersCriteria,
       rateKey: 'market',
       requestsPerSecond: 10,
       cacheTtlMs: 6 * 60 * 60 * 1000
@@ -1488,29 +1548,38 @@ export async function franceTravailMarketAnalysis(env, input = {}) {
       endpoint: HIGH_LEVEL_ENDPOINTS.ACCESS_EMPLOYMENT,
       scope: HIGH_LEVEL_SCOPES.ACCESS_EMPLOYMENT,
       method: 'POST',
-      body: criteria,
+      body: accessCriteria,
       rateKey: 'access-employment',
       requestsPerSecond: 10,
       cacheTtlMs: 6 * 60 * 60 * 1000
     })]
   ];
   if (input.include_difficulty) {
+    const difficultyCriteria = withStatsNomenclature({ ...criteria, codeTypePeriode: 'ANNEE', dernierePeriode: true }, 'TYPE_TENSION');
+    delete difficultyCriteria.listeCodePeriode;
+    const years = statsCodeList(input.difficulty_period_codes);
+    if (years.length) {
+      difficultyCriteria.listeCodePeriode = years;
+      difficultyCriteria.dernierePeriode = false;
+    }
+    sectionCriteria.recruitment_difficulty = difficultyCriteria;
     calls.push(['recruitment_difficulty', highLevelRequest(env, {
       endpoint: HIGH_LEVEL_ENDPOINTS.MARKET_DIFFICULTY,
       scope: HIGH_LEVEL_SCOPES.MARKET,
       method: 'POST',
-      body: criteria,
+      body: difficultyCriteria,
       rateKey: 'market',
       requestsPerSecond: 10,
       cacheTtlMs: 6 * 60 * 60 * 1000
     })]);
   }
   if (input.include_salary) {
+    const salaryCriteria = { codeTypeTerritoire: criteria.codeTypeTerritoire, codeTerritoire: criteria.codeTerritoire, codeRome: criteria.codeActivite };
+    sectionCriteria.salary_statistics = salaryCriteria;
     calls.push(['salary_statistics', highLevelRequest(env, {
-      endpoint: HIGH_LEVEL_ENDPOINTS.MARKET_SALARY,
+      endpoint: HIGH_LEVEL_ENDPOINTS.MARKET_SALARY + encodeURIComponent(salaryCriteria.codeTypeTerritoire) + '/' + encodeURIComponent(salaryCriteria.codeTerritoire),
       scope: HIGH_LEVEL_SCOPES.MARKET,
-      method: 'POST',
-      body: criteria,
+      query: { codeRome: salaryCriteria.codeRome },
       rateKey: 'market',
       requestsPerSecond: 10,
       cacheTtlMs: 6 * 60 * 60 * 1000
@@ -1530,6 +1599,7 @@ export async function franceTravailMarketAnalysis(env, input = {}) {
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
     criteria,
+    section_criteria: sectionCriteria,
     sections,
     section_errors: sectionErrors,
     warnings
@@ -1556,18 +1626,17 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
   defaultPreflight(env);
   const criteria = buildStatsCriteria(input);
   const exitsCriteria = { ...criteria };
-  delete exitsCriteria.codeTypeNomenclature;
-  delete exitsCriteria.listeCodeNomenclature;
+  const sectionCriteria = { training_exits: exitsCriteria };
+  const notRequested = {};
+  let accessCriteria = null;
+  if (input.training_activity) {
+    const type = String(input.training_activity.type || '').trim();
+    const code = String(input.training_activity.code || '').trim();
+    if (!type || !code) throw new FranceTravailApiError('france_travail_invalid_training_activity', 'training_activity requiert type et code issus du référentiel formation.', 400);
+    accessCriteria = withStatsNomenclature({ ...criteria, codeTypeActivite: type, codeActivite: code }, input.nomenclature_type || 'ACCESEMP', input.nomenclature_codes);
+    sectionCriteria.training_access_to_employment = accessCriteria;
+  }
   const calls = [
-    ['training_access_to_employment', highLevelRequest(env, {
-      endpoint: HIGH_LEVEL_ENDPOINTS.TRAINING_ACCESS,
-      scope: HIGH_LEVEL_SCOPES.TRAINING_OUTCOMES,
-      method: 'POST',
-      body: criteria,
-      rateKey: 'training-outcomes',
-      requestsPerSecond: 10,
-      cacheTtlMs: 6 * 60 * 60 * 1000
-    })],
     ['training_exits', highLevelRequest(env, {
       endpoint: HIGH_LEVEL_ENDPOINTS.TRAINING_EXITS,
       scope: HIGH_LEVEL_SCOPES.TRAINING_OUTCOMES,
@@ -1578,6 +1647,20 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
       cacheTtlMs: 6 * 60 * 60 * 1000
     })]
   ];
+
+  if (accessCriteria) {
+    calls.push(['training_access_to_employment', highLevelRequest(env, {
+      endpoint: HIGH_LEVEL_ENDPOINTS.TRAINING_ACCESS,
+      scope: HIGH_LEVEL_SCOPES.TRAINING_OUTCOMES,
+      method: 'POST',
+      body: accessCriteria,
+      rateKey: 'training-outcomes',
+      requestsPerSecond: 10,
+      cacheTtlMs: 6 * 60 * 60 * 1000
+    })]);
+  } else {
+    notRequested.training_access_to_employment = 'training_activity_required';
+  }
 
   const anoteaQuery = buildAnoteaQuery(input);
   const { page, items_par_page, ...anoteaFilters } = anoteaQuery;
@@ -1607,6 +1690,10 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
   results.forEach((result, index) => {
     sections[calls[index][0]] = settledData(calls[index][0], result, warnings, sectionErrors);
   });
+  if (!input.training_activity) {
+    sections.training_access_to_employment = null;
+    warnings.push('L’accès à l’emploi après formation requiert training_activity (type et code du référentiel formation). Consulter france_travail_stats_reference, api=training, resource=activities, type_code=FORM14. Aucun domaine de formation n’est déduit du ROME.');
+  }
   if (!hasAnoteaFilter) {
     sections.anotea_reviews = null;
     warnings.push('AnotÃ©a non interrogÃ© : fournir certif_info, formacode, postcode ou organisme_formateur.');
@@ -1625,8 +1712,6 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
         territory: input.territory,
         include_difficulty: Boolean(input.include_difficulty),
         include_salary: Boolean(input.include_salary),
-        nomenclature_type: input.nomenclature_type,
-        nomenclature_codes: input.nomenclature_codes,
         period_codes: input.period_codes,
         without_characteristics: input.without_characteristics
       });
@@ -1645,6 +1730,8 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
     criteria,
+    section_criteria: sectionCriteria,
+    not_requested: notRequested,
     sections,
     section_errors: sectionErrors,
     anotea_context: anoteaContext,
