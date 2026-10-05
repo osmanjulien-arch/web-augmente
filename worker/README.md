@@ -236,3 +236,19 @@ La disponibilité du mode développeur peut dépendre du compte et de la politiq
 - Le JSON est lu comme un flux borné à 256 Kio.
 - Seuls les champs de page explicitement autorisés sont conservés.
 - Les bearer et secrets sont comparés par empreintes SHA-256 en temps constant.
+
+## Stabilisation 0.4.1
+
+`commune` accepte un nom ou un code INSEE. Les noms sont résolus avec le
+référentiel officiel des communes, mis en cache ; un homonyme nécessite un code
+explicite (`commune_code`). Les codes passent directement sans lookup.
+
+Les versions package, santé HTTP et serveur MCP sont alignées sur 0.4.1.
+Les sources et tests sont encodés en UTF-8. Pour déployer exactement un commit
+Git, partir d’un checkout propre et utiliser `npm run deploy`. Ce script conserve
+les variables et KV, expose le SHA dans `/health` et lance `npm run smoke`.
+Le smoke exige `MCP_ACCESS_TOKEN` (OAuth MCP) et ne journalise ni jeton ni contenu
+des offres. Un refus d’accès ou une section statistique indisponible échoue au
+smoke ; un déploiement réussi ne garantit donc pas un service métier opérationnel.
+La souscription France Travail doit être vérifiée dans le portail développeur
+si La Bonne Boîte refuse encore l’accès avec sa route et ses scopes corrigés.

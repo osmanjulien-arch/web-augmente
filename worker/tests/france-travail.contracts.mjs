@@ -137,3 +137,58 @@ test('reference requests cannot choose an arbitrary API or URL', async () => {
     assert.equal(calls.length, 0);
   });
 });
+
+test('commune names resolve to INSEE codes before offers search', async () => {
+  const previous = globalThis.fetch;
+  resetFranceTravailTokenCacheForTests();
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(new URL(url));
+    if (String(url).includes('/oauth2/access_token')) return Response.json({ access_token: 'fake-token', expires_in: 3600 });
+    if (String(url).endsWith('/referentiel/communes')) return Response.json([{ code: '38185', libelle: 'Grenoble', codePostal: '38000' }]);
+    return Response.json({ resultats: [] });
+  };
+  try {
+    const result = await franceTravail.franceTravailJobsSearch(env, { code_rome: 'I1316', commune: 'Grenoble' });
+    assert.equal(result.request.filters.commune, '38185');
+    assert.equal(urls.find(u => u.pathname.endsWith('/offres/search')).searchParams.get('commune'), '38185');
+  } finally { globalThis.fetch = previous; resetFranceTravailTokenCacheForTests(); }
+});
+
+test('INSEE codes bypass the commune reference', async () => {
+  await record(async calls => {
+    const result = await franceTravail.franceTravailJobsSearch(env, { code_rome: 'I1316', commune_code: '38185' });
+    assert.equal(result.request.filters.commune, '38185');
+    assert.equal(calls.some(c => c.url.pathname.endsWith('/referentiel/communes')), false);
+  });
+});
+
+test('ambiguous commune names fail before offers search', async () => {
+  const previous = globalThis.fetch;
+  resetFranceTravailTokenCacheForTests();
+  const urls = [];
+  globalThis.fetch = async url => {
+    urls.push(String(url));
+    return String(url).includes('/oauth2/access_token') ? Response.json({ access_token: 'fake-token', expires_in: 3600 }) : Response.json([{ libelle: 'Saint-Pierre', code: '11111' }, { libelle: 'Saint-Pierre', code: '22222' }]);
+  };
+  try {
+    await assert.rejects(franceTravail.franceTravailJobsSearch(env, { code_rome: 'I1316', commune: 'Saint-Pierre' }), e => e.code === 'france_travail_invalid_commune');
+    assert.equal(urls.some(u => u.includes('/offres/search')), false);
+  } finally { globalThis.fetch = previous; resetFranceTravailTokenCacheForTests(); }
+});
+
+test('source encodings and published versions remain aligned', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
+  const source = await readFile(new URL('../src/index.js', import.meta.url), 'utf8');
+  assert.equal(pkg.version, '0.4.1');
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[''].version, pkg.version);
+  assert.ok(source.includes(`const API_VERSION = '${pkg.version}';`));
+  for (const path of ['index.js', 'france-travail.js']) {
+    const bytes = await readFile(new URL('../src/' + path, import.meta.url));
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    assert.equal(/Ã|â€|Â/.test(text), false);
+  }
+});

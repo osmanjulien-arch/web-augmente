@@ -1,17 +1,17 @@
-﻿// Client France Travail â€” version gÃ©nÃ©rique multi-API.
+﻿// Client France Travail — version générique multi-API.
 //
 // Le Worker Cloudflare `web-augmente-api` peut consulter plusieurs APIs
-// officielles France Travail en lecture seule (Mes EvÃ¨nements Emploi, Offres
-// d'emploi v2, â€¦). Chacune est dÃ©crite une fois dans API_DEFINITIONS et
-// exposÃ©e via deux fonctions de haut niveau :
-//   - une fonction `*_status` qui vÃ©rifie la configuration cÃ´tÃ© Worker sans
+// officielles France Travail en lecture seule (Mes Evènements Emploi, Offres
+// d'emploi v2, …). Chacune est décrite une fois dans API_DEFINITIONS et
+// exposée via deux fonctions de haut niveau :
+//   - une fonction `*_status` qui vérifie la configuration côté Worker sans
 //     exposer aucun secret ;
 //   - une fonction `search_*` qui interroge l'API officielle via OAuth 2.0
 //     `client_credentials`, avec un jeton mis en cache par couple
 //     (client_id, scope) dans l'isolate Cloudflare.
 //
-// L'endpoint de jeton OAuth est figÃ© cÃ´tÃ© code ; chaque endpoint d'API est
-// verrouillÃ© sur HTTPS et `api.francetravail.io`. La Bonne BoÃ®te peut suivre
+// L'endpoint de jeton OAuth est figé côté code ; chaque endpoint d'API est
+// verrouillé sur HTTPS et `api.francetravail.io`. La Bonne Boîte peut suivre
 // uniquement sa redirection officielle vers `labonneboite.francetravail.fr`.
 
 const DEFAULT_TOKEN_URL = 'https://entreprise.francetravail.fr/connexion/oauth2/access_token?realm=/partenaire';
@@ -21,15 +21,15 @@ const TOKEN_SAFETY_MARGIN_MS = 60_000;
 const TOKEN_REQUEST_TIMEOUT_MS = 12_000;
 
 // ---------------------------------------------------------------------------
-// DÃ©finitions des APIs France Travail supportÃ©es.
+// Définitions des APIs France Travail supportées.
 //
-// Chaque entrÃ©e encapsule :
-//   - l'Ã©tiquette affichÃ©e Ã  l'utilisateur ;
+// Chaque entrée encapsule :
+//   - l'étiquette affichée à l'utilisateur ;
 //   - les variables d'environnement Cloudflare (scope, URL) et leurs valeurs
-//     par dÃ©faut ;
-//   - la mÃ©thode HTTP et le content-type attendus par l'API ;
-//   - la liste blanche des filtres acceptÃ©s ;
-//   - la stratÃ©gie de pagination (query params vs header Range).
+//     par défaut ;
+//   - la méthode HTTP et le content-type attendus par l'API ;
+//   - la liste blanche des filtres acceptés ;
+//   - la stratégie de pagination (query params vs header Range).
 // ---------------------------------------------------------------------------
 
 const DEFAULT_EVENTS_URL = 'https://api.francetravail.io/partenaire/evenements/v1/mee/evenements';
@@ -131,7 +131,7 @@ const rateQueues = new Map();
 
 const API_DEFINITIONS = {
   events: {
-    label: 'France Travail - Mes EvÃ¨nements Emploi',
+    label: 'France Travail - Mes Evènements Emploi',
     shortName: 'events',
     scopeEnv: 'FRANCE_TRAVAIL_EVENTS_SCOPE',
     urlEnv: 'FRANCE_TRAVAIL_EVENTS_URL',
@@ -173,11 +173,11 @@ const API_DEFINITIONS = {
 };
 
 // Tokens OAuth mis en cache par couple (client_id, scope) : events et offres
-// possÃ¨dent des scopes distincts et ne partagent jamais un mÃªme jeton.
+// possèdent des scopes distincts et ne partagent jamais un même jeton.
 const tokenCaches = new Map();
 
 // ---------------------------------------------------------------------------
-// Erreur spÃ©cialisÃ©e et helpers gÃ©nÃ©riques.
+// Erreur spécialisée et helpers génériques.
 // ---------------------------------------------------------------------------
 
 export class FranceTravailApiError extends Error {
@@ -246,7 +246,7 @@ function requireConfiguration(env, def) {
   if (!status.configured) {
     throw new FranceTravailApiError(
       `france_travail_${def.shortName}_not_configured`,
-      `Configuration France Travail incomplÃ¨te pour ${def.label} : ${status.missing.join(', ')}.`,
+      `Configuration France Travail incomplète pour ${def.label} : ${status.missing.join(', ')}.`,
       503,
       status
     );
@@ -278,9 +278,9 @@ async function parseResponsePayload(response) {
 }
 
 async function requestAccessToken(env, scope, shortName, preflight) {
-  // PrÃ©serve le comportement historique : la configuration est vÃ©rifiÃ©e avant
-  // toute consultation du cache, pour faire remonter immÃ©diatement les erreurs
-  // de configuration cÃ´tÃ© MCP plutÃ´t qu'Ã  l'expiration du jeton.
+  // Préserve le comportement historique : la configuration est vérifiée avant
+  // toute consultation du cache, pour faire remonter immédiatement les erreurs
+  // de configuration côté MCP plutôt qu'à l'expiration du jeton.
   if (preflight) preflight(env);
   const cacheKey = tokenCacheKey(env, scope, shortName);
   const cached = tokenCaches.get(cacheKey);
@@ -331,7 +331,7 @@ async function requestAccessToken(env, scope, shortName, preflight) {
 
   if (!response.ok) {
     const errorCode = payload?.error || 'token_request_failed';
-    const description = payload?.error_description || payload?.message || 'France Travail a refusÃ© la crÃ©ation du jeton OAuth.';
+    const description = payload?.error_description || payload?.message || 'France Travail a refusé la création du jeton OAuth.';
     throw new FranceTravailApiError(
       errorCode === 'invalid_client' ? 'france_travail_invalid_client' : 'france_travail_token_failed',
       String(description),
@@ -344,7 +344,7 @@ async function requestAccessToken(env, scope, shortName, preflight) {
   if (!tokenPayload?.access_token) {
     throw new FranceTravailApiError(
       'france_travail_token_invalid',
-      'La rÃ©ponse OAuth France Travail ne contient pas de jeton exploitable.',
+      'La réponse OAuth France Travail ne contient pas de jeton exploitable.',
       502,
       { api: shortName }
     );
@@ -382,7 +382,7 @@ function normalizeFilters(filters, def) {
 }
 
 // ---------------------------------------------------------------------------
-// API : Mes EvÃ¨nements Emploi (pagination via query params).
+// API : Mes Evènements Emploi (pagination via query params).
 // ---------------------------------------------------------------------------
 
 function normalizeEventsPagination(input = {}) {
@@ -451,8 +451,8 @@ function buildOffresRequest(env, input = {}) {
   const { page, size } = normalizeOffresPagination(input);
   const url = new URL(status.endpoint);
   const filters = normalizeFilters(input.filters, def);
-  // Les filtres officiels de l'API Offres d'emploi v2 sont transportÃ©s en
-  // query string ; la pagination est doublÃ©e en query (`range`) et en header
+  // Les filtres officiels de l'API Offres d'emploi v2 sont transportés en
+  // query string ; la pagination est doublée en query (`range`) et en header
   // Range (RFC 7233) pour suivre la convention de l'API.
   for (const [key, value] of Object.entries(filters)) {
     if (Array.isArray(value)) {
@@ -495,7 +495,7 @@ async function fetchOffresOnce(env, input, token) {
 }
 
 // ---------------------------------------------------------------------------
-// ExÃ©cution gÃ©nÃ©rique d'une recherche.
+// Exécution générique d'une recherche.
 // ---------------------------------------------------------------------------
 
 function buildRequestSummary(def, result) {
@@ -528,7 +528,7 @@ async function performSearch(env, input, def, fetchFn) {
     const upstreamMessage = result.payload?.message
       || result.payload?.error_description
       || result.payload?.error
-      || `Erreur HTTP ${result.response.status} renvoyÃ©e par France Travail.`;
+      || `Erreur HTTP ${result.response.status} renvoyée par France Travail.`;
     throw new FranceTravailApiError(
       `france_travail_${def.shortName}_failed`,
       String(upstreamMessage),
@@ -579,18 +579,18 @@ export function resetFranceTravailTokenCacheForTests() {
 }
 
 // ---------------------------------------------------------------------------
-// Client gÃ©nÃ©rique rÃ©utilisable FranceTravailClient.
+// Client générique réutilisable FranceTravailClient.
 //
 // Les exports haut niveau (searchFranceTravailEvents / searchFranceTravailOffres)
-// reposent sur performSearch et n'utilisent pas cette classe : elle est destinÃ©e
+// reposent sur performSearch et n'utilisent pas cette classe : elle est destinée
 // aux modules externes qui doivent interroger n'importe quel endpoint officiel
-// (par exemple pour un nouveau scÃ©nario MCP) en bÃ©nÃ©ficiant gratuitement de :
-//   - la mise en cache OAuth2 client_credentials dans `tokenCaches` (clÃ©
+// (par exemple pour un nouveau scénario MCP) en bénéficiant gratuitement de :
+//   - la mise en cache OAuth2 client_credentials dans `tokenCaches` (clé
 //     `clientId|scope`) avec invalidation et renouvellement sur 401 ;
-//   - la validation stricte de l'hÃ´te initial (`https://api.francetravail.io`) ;
-//   - une allowlist explicite pour les rares redirections documentÃ©es ;
-//   - un timeout AbortController configurable (par dÃ©faut 15 s) ;
-//   - des retries exponentiels avec jitter sur 429 / 5xx / erreurs rÃ©seau.
+//   - la validation stricte de l'hôte initial (`https://api.francetravail.io`) ;
+//   - une allowlist explicite pour les rares redirections documentées ;
+//   - un timeout AbortController configurable (par défaut 15 s) ;
+//   - des retries exponentiels avec jitter sur 429 / 5xx / erreurs réseau.
 // ---------------------------------------------------------------------------
 
 const CLIENT_DEFAULT_TIMEOUT_MS = 15_000;
@@ -636,7 +636,7 @@ function safeParseUrl(url, label) {
     if (!isValid) {
       throw new FranceTravailApiError(
         'france_travail_invalid_endpoint',
-        `Endpoint ${label} doit utiliser https://${ALLOWED_API_HOST} (reÃ§u : ${parsed.protocol}//${parsed.hostname}).`,
+        `Endpoint ${label} doit utiliser https://${ALLOWED_API_HOST} (reçu : ${parsed.protocol}//${parsed.hostname}).`,
         503,
         { endpoint: url }
       );
@@ -747,14 +747,14 @@ export class FranceTravailClient {
     if (!url || typeof url !== 'string') {
       throw new FranceTravailApiError(
         'france_travail_invalid_request',
-        'URL France Travail manquante pour la requÃªte.',
+        'URL France Travail manquante pour la requête.',
         500
       );
     }
     if (!scope || typeof scope !== 'string') {
       throw new FranceTravailApiError(
         'france_travail_invalid_scope',
-        'Scope OAuth France Travail requis pour la requÃªte.',
+        'Scope OAuth France Travail requis pour la requête.',
         500
       );
     }
@@ -873,7 +873,7 @@ export class FranceTravailClient {
           }
           throw new FranceTravailApiError(
             'france_travail_timeout',
-            `La requÃªte France Travail a dÃ©passÃ© ${effectiveTimeout}ms.`,
+            `La requête France Travail a dépassé ${effectiveTimeout}ms.`,
             504,
             { endpoint: parsedUrl.toString(), timeout_ms: effectiveTimeout }
           );
@@ -890,7 +890,7 @@ export class FranceTravailClient {
         if (error instanceof FranceTravailApiError) throw error;
         throw new FranceTravailApiError(
           'france_travail_network_error',
-          error?.message || 'Erreur rÃ©seau vers France Travail.',
+          error?.message || 'Erreur réseau vers France Travail.',
           502,
           { endpoint: parsedUrl.toString() }
         );
@@ -905,7 +905,7 @@ export class FranceTravailClient {
         attempt += 1;
         lastError = new FranceTravailApiError(
           'france_travail_unauthorized',
-          'Authentification France Travail rejetÃ©e (401).',
+          'Authentification France Travail rejetée (401).',
           401,
           { endpoint: parsedUrl.toString() }
         );
@@ -919,7 +919,7 @@ export class FranceTravailClient {
         });
         lastError = new FranceTravailApiError(
           'france_travail_upstream_error',
-          `RÃ©ponse upstream ${response.status} - nouvelle tentative.`,
+          `Réponse upstream ${response.status} - nouvelle tentative.`,
           response.status,
           { endpoint: parsedUrl.toString() }
         );
@@ -939,7 +939,7 @@ export class FranceTravailClient {
 
     throw lastError || new FranceTravailApiError(
       'france_travail_request_failed',
-      'La requÃªte France Travail a Ã©chouÃ© aprÃ¨s plusieurs tentatives.',
+      'La requête France Travail a échoué après plusieurs tentatives.',
       502,
       { endpoint: parsedUrl.toString() }
     );
@@ -961,7 +961,7 @@ export class FranceTravailClient {
 
 // ---------------------------------------------------------------------------
 // Outils haut niveau pour le MCP Recherche France Travail.
-// Les caches et limites sont "best effort" par isolate Cloudflare : ils Ã©vitent
+// Les caches et limites sont "best effort" par isolate Cloudflare : ils évitent
 // les fan-outs inutiles mais ne constituent pas un rate limiter global.
 // ---------------------------------------------------------------------------
 
@@ -1123,6 +1123,26 @@ function buildHighLevelOfferFilters(input = {}) {
   return filters;
 }
 
+async function resolveCommunes(env, value) {
+  if (value === undefined || value === null) return value;
+  const entries = (Array.isArray(value) ? value : String(value).split(',')).map(v => String(v).trim());
+  if (entries.every(v => /^[0-9A-B]{5}$/i.test(v))) return entries;
+  const response = await highLevelRequest(env, {
+    endpoint: 'https://api.francetravail.io/partenaire/offresdemploi/v2/referentiel/communes',
+    scope: HIGH_LEVEL_SCOPES.OFFERS, rateKey: 'offers', requestsPerSecond: 10,
+    cacheTtlMs: 24 * 60 * 60 * 1000
+  });
+  const communes = Array.isArray(response.data) ? response.data : response.data?.communes;
+  if (!Array.isArray(communes)) throw new FranceTravailApiError('france_travail_geography_unavailable', 'Référentiel des communes indisponible.', 502);
+  const normalize = v => String(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return entries.map(value => {
+    if (/^[0-9A-B]{5}$/i.test(value)) return value.toUpperCase();
+    const matches = communes.filter(c => normalize(c.libelle) === normalize(value));
+    if (matches.length !== 1) throw new FranceTravailApiError('france_travail_invalid_commune', matches.length ? 'Commune ambiguë : fournir son code INSEE.' : 'Commune inconnue : vérifier son nom ou fournir son code INSEE.', 400);
+    return matches[0].code;
+  });
+}
+
 export async function franceTravailJobsSearch(env, input = {}) {
   defaultPreflight(env);
   const query = String(input.query || '').trim();
@@ -1140,17 +1160,18 @@ export async function franceTravailJobsSearch(env, input = {}) {
       const prediction = await predictRomeJobs(env, query, context, 3);
       resolvedRomeCodes = prediction.codes.slice(0, 3);
       romeoPredictions = prediction.predictions;
-      if (!resolvedRomeCodes.length) warnings.push('ROMEO nâ€™a retournÃ© aucun code ROME exploitable ; recherche par mots-clÃ©s utilisÃ©e.');
+      if (!resolvedRomeCodes.length) warnings.push('ROMEO n’a retourné aucun code ROME exploitable ; recherche par mots-clés utilisée.');
     } catch (error) {
-      warnings.push(`ROMEO indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'} ; recherche par mots-clÃ©s utilisÃ©e.`);
+      warnings.push(`ROMEO indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'} ; recherche par mots-clés utilisée.`);
     }
   }
 
-  const filters = buildHighLevelOfferFilters(input);
+  const communes = await resolveCommunes(env, input.commune_code ?? input.commune);
+  const filters = buildHighLevelOfferFilters({ ...input, commune: communes });
   if (resolvedRomeCodes.length) filters.codeROME = resolvedRomeCodes.join(',');
   else if (query) filters.motsCles = query;
   if (!Object.keys(filters).length) {
-    throw new FranceTravailApiError('france_travail_jobs_query_missing', 'Une requÃªte, un code ROME ou au moins un filtre est requis.', 400);
+    throw new FranceTravailApiError('france_travail_jobs_query_missing', 'Une requête, un code ROME ou au moins un filtre est requis.', 400);
   }
 
   const maxResults = Math.min(150, Math.max(1, Number(input.max_results) || 25));
@@ -1400,7 +1421,7 @@ export async function franceTravailJobAnalyze(env, input = {}) {
       warnings.push(`Fiche ROME indisponible : ${error instanceof FranceTravailApiError ? error.code : 'erreur_inconnue'}.`);
     }
   } else {
-    warnings.push("Aucun code ROME n'a Ã©tÃ© trouvÃ© dans le dÃ©tail de l'offre.");
+    warnings.push("Aucun code ROME n'a été trouvé dans le détail de l'offre.");
   }
 
   return {
@@ -1442,7 +1463,7 @@ function buildStatsCriteria(input = {}) {
     const type = String(input.territory.type || '').trim();
     const code = String(input.territory.code || '').trim();
     if ((type && !code) || (!type && code)) {
-      throw new FranceTravailApiError('france_travail_invalid_territory', 'Le type et le code du territoire doivent Ãªtre fournis ensemble.', 400);
+      throw new FranceTravailApiError('france_travail_invalid_territory', 'Le type et le code du territoire doivent être fournis ensemble.', 400);
     }
     if (type && code) {
       const aliases = { DEPARTEMENT: 'DEP', REGION: 'REG', NATIONAL: 'NAT' };
@@ -1594,7 +1615,7 @@ export async function franceTravailMarketAnalysis(env, input = {}) {
     sections[calls[index][0]] = settledData(calls[index][0], result, warnings, sectionErrors);
   });
   return {
-    source: "France Travail - MarchÃ© du travail et accÃ¨s Ã  l'emploi",
+    source: "France Travail - Marché du travail et accès à l'emploi",
     status: analysisStatus(sections, sectionErrors),
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
@@ -1696,7 +1717,7 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
   }
   if (!hasAnoteaFilter) {
     sections.anotea_reviews = null;
-    warnings.push('AnotÃ©a non interrogÃ© : fournir certif_info, formacode, postcode ou organisme_formateur.');
+    warnings.push('Anotéa non interrogé : fournir certif_info, formacode, postcode ou organisme_formateur.');
   } else {
     warnings.push('Les avis Anotéa sont filtrés par les critères de anotea_context, jamais par code ROME. Leur lien avec le métier demandé n’est pas établi.');
     if (anoteaContext.scope !== 'formation') {
@@ -1725,7 +1746,7 @@ export async function franceTravailTrainingAnalysis(env, input = {}) {
   const combinedErrors = market ? { ...sectionErrors, ...market.section_errors } : sectionErrors;
 
   return {
-    source: "France Travail - formation, dÃ©bouchÃ©s et avis",
+    source: "France Travail - formation, débouchés et avis",
     status: analysisStatus(combinedSections, combinedErrors),
     fetched_at: new Date().toISOString(),
     rome_code: criteria.codeActivite,
