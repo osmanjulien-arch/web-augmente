@@ -22,17 +22,23 @@ export const sources = [
   { id:'boulanger-orange', type:'product-ld',
     url:'https://www.boulanger.com/ref/1226095?offer=26284cfd-6b5a-44e8-a0d1-5bd6db904aaf',
     allowedHost:'www.boulanger.com', sellerFallback:'Boulanger',
-    requireSellerProof:true, enabled:true },
+    requireSellerProof:true, enabled:false },
   { id:'boulanger-bleu', type:'product-ld',
     url:'https://www.boulanger.com/ref/1227789',
     allowedHost:'www.boulanger.com', sellerFallback:'Boulanger',
-    requireSellerProof:true, enabled:true },
+    requireSellerProof:true, enabled:false },
   { id:'ldlc-bleu', type:'product-ld',
     url:'https://www.ldlc.com/fiche/PB00702832.html',
     allowedHost:'www.ldlc.com', enabled:true },
   { id:'ldlc-argent', type:'product-ld',
     url:'https://www.ldlc.com/fiche/PB00702830.html',
-    allowedHost:'www.ldlc.com', enabled:false } // BackOrder at first check; re-enable when available.
+    allowedHost:'www.ldlc.com', enabled:false }, // BackOrder; re-enable when in stock.
+  { id:'macway-bleu', type:'product-ld',
+    url:'https://www.macway.com/apple-iphone-17-pro-max-256-go-bleu-intense/p3185211',
+    allowedHost:'www.macway.com', enabled:true },
+  { id:'macway-argent', type:'product-ld',
+    url:'https://www.macway.com/apple-iphone-17-pro-max-256-go-argent/p3185216',
+    allowedHost:'www.macway.com', enabled:false } // Page does not attest new condition.
   // { id: 'mon-comparateur', type: 'json',
   //   url: 'https://api.exemple.fr/prices.json', allowedHost:'api.exemple.fr', enabled: false }
 ];

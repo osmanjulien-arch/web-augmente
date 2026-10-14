@@ -158,13 +158,13 @@ test('merchant indicative prices persist without fabricating delivered price',as
     '<script type="application/ld+json">'+product+'</script>',{status:200});
   await runScheduled(env,feed);
   const indications=(await env.DB.prepare('SELECT * FROM indications').bind().all()).results;
-  assert.equal(indications.length,5);
+  assert.equal(indications.length,4);
   assert.equal(indications[0].shipping_status,'unknown');
   const confirmed=(await env.DB.prepare('SELECT * FROM offers').bind().all()).results;
   assert.equal(confirmed.length,0);
   const view=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
   assert.equal(view.status,200);
-  assert.equal((await view.json()).indications.length,5);
+  assert.equal((await view.json()).indications.length,4);
 });
 
 import {telegramNotify,telegramLeadNotify,indicationNotify} from '../src/core/notify.mjs';
@@ -234,9 +234,28 @@ test('public endpoint exposes per-source freshness and failures',async()=>{
   return new Response(JSON.stringify({error:'blocked'}),{status:403});
  };
  const result=await runScheduled(env,mock);
- assert.equal(result.sourceFailed,5);
+ assert.equal(result.sourceFailed,4);
  const response=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
  const json=await response.json();
- assert.equal(json.source_health.length,6);
- assert.equal(json.source_health.filter(x=>x.state==='error').length,5);
+ assert.equal(json.source_health.length,5);
+ assert.equal(json.source_health.filter(x=>x.state==='error').length,4);
+});
+
+
+test('MacWay nested AggregateOffer retains only available new child offers',()=>{
+  const src={url:'https://www.macway.com/apple-iphone-17-pro-max-256-go-bleu-intense/p3185211'};
+  const html='<script type="application/ld+json">'+JSON.stringify({
+    '@type':'Product',name:'Apple iPhone 17 Pro Max 256 Go - Bleu intense',
+    offers:{'@type':'AggregateOffer',lowPrice:30,offers:[
+      {'@type':'Offer',price:1479,priceCurrency:'EUR',
+        availability:'http://schema.org/InStock',
+        itemCondition:'http://schema.org/NewCondition',seller:{name:'MacWay'}},
+      {'@type':'Offer',price:30,priceCurrency:'EUR',
+        availability:'http://schema.org/InStock',
+        itemCondition:'http://schema.org/UsedCondition',seller:{name:'Marketplace'}}
+    ]}})+'</script>';
+  const o=parseProductLd(html,src);
+  assert.equal(o.length,1);
+  assert.equal(o[0].price_eur,1479);
+  assert.equal(o[0].merchant,'MacWay');
 });

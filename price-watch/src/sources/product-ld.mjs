@@ -2,6 +2,7 @@
 export function parseProductLd(html, source) {
   if (typeof html !== 'string' || html.length > 800000) throw new Error('invalid product HTML');
   const out=[];
+  let productCount=0, newCount=0, stockCount=0;
   // Conditional fallback for Boulanger only; never infer a seller from
   // a product title or from a retailer's domain alone.
   const merchantProof = source.requireSellerProof === true &&
@@ -18,10 +19,19 @@ export function parseProductLd(html, source) {
       for (const product of candidates) {
         const kinds=Array.isArray(product?.['@type'])?product['@type']:[product?.['@type']];
         if (!kinds.some(t=>String(t).toLowerCase().split('/').pop()==='product')) continue;
-        const offers=Array.isArray(product.offers)?product.offers:[product.offers];
+        productCount++;
+        const topOffers=Array.isArray(product.offers)?product.offers:[product.offers];
+        // A Product may advertise a price only via an AggregateOffer with
+        // individual child Offer objects. Never treat lowPrice alone as a purchase offer.
+        const offers=topOffers.flatMap(o=>
+          String(o?.['@type']||'').split('/').pop()==='AggregateOffer'
+            ? (Array.isArray(o.offers)?o.offers:[o.offers]).filter(Boolean).slice(0,30)
+            : [o]);
         for (const offer of offers) {
           if (!offer || String(offer.itemCondition||'').split('/').pop()!=='NewCondition') continue;
+          newCount++;
           if (String(offer.availability||'').split('/').pop()!=='InStock') continue;
+          stockCount++;
           if (offer.priceCurrency!=='EUR') continue;
           const price=Number(offer.price);
           if (!Number.isFinite(price)||price<1||price>100000) continue;
@@ -35,6 +45,6 @@ export function parseProductLd(html, source) {
       }
     }
   }
-  if(!out.length) throw new Error('no eligible new in-stock JSON-LD offer');
+  if(!out.length) throw new Error(`no eligible new in-stock JSON-LD offer (product=${productCount},new=${newCount},stock=${stockCount},seller_proof=${merchantProof})`);
   return out;
 }

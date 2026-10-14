@@ -92,7 +92,7 @@ Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` 
 
 ## Extension enseignes (octobre 2026)
 
-- Sources actives (en attente de validation depuis Cloudflare) : Dealabs RSS ; fiches neuves Materiel.net, Rue du Commerce, Boulanger (orange et bleu) et LDLC (bleu). La fiche LDLC argent est volontairement désactivée : offre en réapprovisionnement au contrôle initial.
+- Sources actives validées depuis Cloudflare : Dealabs RSS ; Materiel.net (orange), Rue du Commerce (argent), LDLC (bleu), MacWay (bleu). Les fiches Boulanger (orange et bleu) sont désactivées car les requêtes Cloudflare ont échoué (réponses non exploitables puis HTTP 400). LDLC argent est désactivé car en réapprovisionnement ; MacWay argent car son JSON-LD n'atteste pas l'état neuf.
 - Boulanger ne fournit pas systématiquement l'identité du vendeur dans le JSON-LD : un vendeur de repli Boulanger est accepté uniquement avec une preuve textuelle explicite « produit neuf vendu et expédié par Boulanger » et un JSON-LD NewCondition/InStock.
 - Fnac, Darty : accès automatisé refusé (403) lors des essais ; pas de contournement.
 - Cdiscount : l'HTML accessible par le collecteur ne contient pas de fiche Product JSON-LD exploitable ; pas de prix automatique.
