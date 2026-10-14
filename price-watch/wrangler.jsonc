@@ -1,0 +1,11 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wa-price-watch",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-01",
+  "triggers": {"crons": ["0 * * * *"]},
+  "vars": {"WATCH_MAX_EUR": "1100", "ALERT_RSS_LEADS": "true"},
+  "d1_databases": [
+    {"binding":"DB", "database_name":"price-watch-db", "database_id":"REPLACE_WITH_D1_DATABASE_ID", "migrations_dir":"migrations"}
+  ]
+}
