@@ -132,3 +132,13 @@ Le point de consultation public /api/v1/public expose désormais source_health :
 - Fiches commerciales nouvelles via LDLC : 16 Pro Max 256/512 (neuf absent sur les offres captées), 17 Pro Max 1 To (en rupture), 18 Pro Max 256/512/2 To, Mac mini 32/48/64 Go, Mac Studio M5 Max 36 Go, M4 Max 64/128 Go, M3 Ultra 512 Go et M2 Ultra 128 Go. Les sources marquées allowUnavailable=true renvoient zéro offre lorsqu'il n'y a pas de produit neuf immédiatement disponible ; pas de faux état « en stock ».
 - Le tableau comprend des filtres de familles/générations/capacités/taille du modèle Q4 ; les prix disponibles de Mac **ne garantissent pas que tous les modèles 30 à 200B soient vendus à l'instant**. Les prix publiés restent hors frais de livraison inconnus.
 - Intégration indépendante, pas de fusion avec le projet Safari.
+
+## Validation de production du catalogue
+
+- Version stable publiée sur `wa-price-watch` : vérification D1 distante effectuée, **20 sources actives, 20 réussites et 0 erreur** après correction de la collecte parallèle (6 collectes HTTP en parallèle, écriture D1 séquentielle).
+- Les trois URL LDLC correspondant à des Mac Studio M4 Max 128 Go, M3 Ultra 512 Go, M2 Ultra 128 Go n'exposent plus de fiche de produit structurée utilisable ; elles sont **désactivées** (pas de fausse disponibilité).
+- Résultats effectivement relevés : quatre offres iPhone 17 Pro Max 256 Go ; iPhone 18 Pro Max 2 To (LDLC) ; Mac Studio M5 Max **36 Go RAM** (LDLC, classement indicatif 30B Q4).
+- Mac mini surveillés : M6 32 Go et M5 Pro 48/64 Go ; aucune offre immédiatement disponible confirmée lors de ce contrôle. 
+- **Aucune offre Mac 256 Go ou plus n'est confirmée** à la date du premier scan ; le filtre 200B reste vide tant qu'une fiche marchande autorisée ne donne pas de prix et disponibilité.
+- RSS limité à une tentative de notification par exécution pour éviter les refus de débit ntfy. Les baisses de prix restent prioritaires et distinctes.
+- Tableau mobile chargé dans Chrome : prix et dernière collecte affichés. 25 tests automatisés, dont vérification de syntaxe du script destiné au navigateur.
