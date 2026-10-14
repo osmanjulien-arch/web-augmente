@@ -1,0 +1,26 @@
+name: POC Safari control checks
+on:
+  pull_request:
+    paths:
+      - 'poc/**'
+      - '.github/workflows/poc-control-tests.yml'
+  push:
+    branches:
+      - 'feature/safe-form-inspection-20261014'
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check poc/remote-control-worker.mjs
+          node --check poc/web-augmente-control.user.js
+          node --check poc/web-augmente-navigation-live.user.js
+      - name: Worker queue unit tests
+        run: node --test poc/control-worker.test.mjs
