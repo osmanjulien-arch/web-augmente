@@ -1,7 +1,7 @@
 import {activeWatches,sources} from '../config.mjs';
 import {watchFor,normalizeOffer,qualifies} from './match.mjs';
-import {saveLead,saveOffer,lastAlertPrice,markAlert,saveRun} from './storage.mjs';
-import {telegramNotify,telegramLeadNotify} from './notify.mjs';
+import {saveLead,saveOffer,lastAlertPrice,markAlert,saveRun,saveIndication,previousIndicationAlert,markIndicationAlert} from './storage.mjs';
+import {telegramNotify,telegramLeadNotify,indicationNotify} from './notify.mjs';
 import {collect} from '../sources/registry.mjs';
 
 async function storePrices(items, sourceId, env, result, now) {
@@ -28,7 +28,7 @@ async function storePrices(items, sourceId, env, result, now) {
 
 function newResult() {
   return {sourceOk:0,sourceFailed:0,leadsAdded:0,offersSeen:0,alertsSent:0,
-    notificationsPending:0,leadsNotified:0,errors:[]};
+    notificationsPending:0,leadsNotified:0,indicationsSeen:0,errors:[]};
 }
 
 export async function ingestManual(payload,env) {
@@ -60,6 +60,20 @@ export async function runScheduled(env, fetchImpl=fetch) {
                 else result.notificationsPending++;
               } catch(e) {result.errors.push(`RSS alert: ${String(e.message).slice(0,100)}`);}
             }
+          }
+        }
+      } else if (data.kind === 'indication') {
+        for (const item of data.items) {
+          const watch=watchFor(item,watches);
+          if(!watch) continue;
+          const stored=await saveIndication(env.DB,item,watch,source.id,now);
+          result.indicationsSeen++;
+          const prev=await previousIndicationAlert(env.DB,stored.key);
+          if(stored.priceCents <= watch.maxCents &&
+             (prev===null || stored.priceCents <= prev-100) && result.alertsSent<5) {
+            const sent=await indicationNotify(env,item,watch);
+            if(sent.sent) {await markIndicationAlert(env.DB,stored.key,stored.priceCents,now);result.alertsSent++;}
+            else result.notificationsPending++;
           }
         }
       } else await storePrices(data.items,source.id,env,result,now);

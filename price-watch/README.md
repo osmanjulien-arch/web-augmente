@@ -81,3 +81,11 @@ Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` 
 - Isolated worker: wa-price-watch; D1: price-watch-db (WEUR); Cron: hourly UTC.
 - API_TOKEN and Telegram secrets not configured; private API returns 401 and no notification delivery is active.
 - Feed parsing verified locally; production cron execution not yet independently confirmed.
+
+## Sources automatiques et alertes push — 14 octobre 2026
+
+- Merchant JSON-LD collect: Materiel.net (iPhone 17 Pro Max 256 Go orange) and Rue du Commerce (iPhone 17 Pro Max 256 Go argent). Do not assume the advertised price includes shipping; observations go to the `indications` table, not confirmed delivered-price offers.
+- New public read-only endpoint: `GET /api/v1/public` with source timestamps, stated shipping uncertainty, and last run diagnostics. No API token is exposed.
+- Price signals below configured threshold may be sent via ntfy, with clear mention that shipping is not confirmed. Existing confirmed-price and RSS lead alerts use ntfy if Telegram is not configured.
+- ntfy has a random topic deployed as a Cloudflare secret; subscription requires a one-time user action in the ntfy iOS app. The topic name is stored separately on the user's device at `Documents/PriceWatch-Build-20261014/ntfy-topic.txt`. Do not commit the topic to the public repository.
+- Product-page polling remains limited by the merchants' website conditions and anti-bot controls. If source fetching fails, failures are recorded rather than fabricated values.

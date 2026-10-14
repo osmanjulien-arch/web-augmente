@@ -5,7 +5,7 @@ export async function fetchText(source, fetchImpl=fetch) {
   }
   const result = await fetchImpl(url, {
     method:'GET', redirect:'manual', signal:AbortSignal.timeout(10000),
-    headers:{'Accept':'application/xml, application/rss+xml, application/atom+xml, application/json, text/xml;q=0.9',
+    headers:{'Accept':'application/xml, application/rss+xml, application/atom+xml, application/json, text/html, text/xml;q=0.9',
       'User-Agent':'WA-Price-Watch/0.1 (+private product monitoring)'}
   });
   if (!result.ok) throw new Error(`source ${source.id}: HTTP ${result.status}`);

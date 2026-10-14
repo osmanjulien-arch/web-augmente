@@ -1,5 +1,9 @@
 export async function telegramNotify(env, offer, watch, fetchImpl=fetch) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return {sent:false, reason:'telegram_not_configured'};
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    return ntfyNotify(env,'Alerte prix '+watch.label,
+      `${(offer.totalCents/100).toFixed(2)} € livraison incluse, prix déclaré.\n`+
+      offer.merchant+' - '+offer.title+'\n'+offer.url,offer.url,fetchImpl);
+  }
   const text = [
     `Prix sous ton seuil : ${watch.label}`,
     `${(offer.totalCents/100).toFixed(2)} € livré (seuil ${(watch.maxCents/100).toFixed(2)} €)`,
@@ -19,7 +23,10 @@ export async function telegramNotify(env, offer, watch, fetchImpl=fetch) {
 
 
 export async function telegramLeadNotify(env, lead, watch, fetchImpl=fetch) {
-  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return {sent:false, reason:'telegram_not_configured'};
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    return ntfyNotify(env,'Piste RSS '+watch.label,
+      'Annonce non vérifiée : '+lead.title+'\n'+lead.url,lead.url,fetchImpl);
+  }
   const text = [
     `Piste RSS à vérifier : ${watch.label}`,
     `Annonce : ${lead.title}`,
@@ -33,4 +40,24 @@ export async function telegramLeadNotify(env, lead, watch, fetchImpl=fetch) {
   });
   if (!response.ok) throw new Error(`Telegram HTTP ${response.status}`);
   return {sent:true};
+}
+
+
+// Public ntfy topics: the random topic acts as a bearer capability. Never include personal data.
+export async function ntfyNotify(env,title,message,link,fetchImpl=fetch){
+  if(!env.NTFY_TOPIC || !/^[a-zA-Z0-9_-]{20,64}$/.test(env.NTFY_TOPIC))return {sent:false,reason:'ntfy_not_configured'};
+  const res=await fetchImpl('https://ntfy.sh/'+env.NTFY_TOPIC,{
+    method:'POST', headers:{
+      'Content-Type':'text/plain; charset=utf-8','X-Title':title.slice(0,150),
+      'X-Click':link,'X-Priority':'default'
+    },body:message.slice(0,3500),signal:AbortSignal.timeout(10000)
+  });
+  if(!res.ok) throw new Error('ntfy HTTP '+res.status);
+  return {sent:true};
+}
+export async function indicationNotify(env,item,watch,fetchImpl=fetch){
+  const price=Number(item.price_eur).toFixed(2);
+  const message='Prix marchand affiché : '+price+' € (livraison NON vérifiée)\n'+
+    'Vendeur : '+item.merchant+'\n'+item.title+'\nConfirmer le prix livré au panier avant achat.\n'+item.url;
+  return ntfyNotify(env,'Piste prix iPhone 17 Pro Max',message,item.url,fetchImpl);
 }

@@ -10,7 +10,13 @@ export const watches = [
 export const sources = [
   { id: 'dealabs-telephonie', type: 'rss',
     url: 'https://www.dealabs.com/rss/groupe/telephonie',
-    allowedHost: 'www.dealabs.com', enabled: true }
+    allowedHost: 'www.dealabs.com', enabled: true },
+  { id:'materiel-orange', type:'product-ld',
+    url:'https://www.materiel.net/produit/202509100081.html',
+    allowedHost:'www.materiel.net', enabled:true },
+  { id:'rueducommerce-argent', type:'product-ld',
+    url:'https://www.rueducommerce.fr/p/r25099019850.html',
+    allowedHost:'www.rueducommerce.fr', enabled:true }
   // { id: 'mon-comparateur', type: 'json',
   //   url: 'https://api.exemple.fr/prices.json', allowedHost:'api.exemple.fr', enabled: false }
 ];

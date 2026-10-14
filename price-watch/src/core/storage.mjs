@@ -53,3 +53,28 @@ export async function saveRun(db, result, started, ended) {
     .bind(started,ended,result.sourceOk,result.sourceFailed,result.leadsAdded,
       result.offersSeen,result.alertsSent,JSON.stringify(result.errors.slice(0,10))).run();
 }
+
+
+export async function saveIndication(db, offer, watch, sourceId, now) {
+  const key=await fingerprint('indication',sourceId,offer.merchant.toLowerCase(),offer.url);
+  const cents=Math.round(offer.price_eur*100);
+  const prev=await db.prepare('SELECT price_cents FROM indications WHERE key=?').bind(key).first();
+  await db.prepare(`INSERT INTO indications
+    (key,watch_id,source_id,merchant,title,url,price_cents,shipping_status,first_seen,last_seen)
+    VALUES (?,?,?,?,?,?,?,'unknown',?,?)
+    ON CONFLICT(key) DO UPDATE SET title=excluded.title,price_cents=excluded.price_cents,last_seen=excluded.last_seen`)
+    .bind(key,watch.id,sourceId,offer.merchant,offer.title,offer.url,cents,now,now).run();
+  if(!prev || prev.price_cents!==cents) await db.prepare(
+    'INSERT INTO indication_observations (indication_key,watch_id,price_cents,observed_at) VALUES (?,?,?,?)'
+  ).bind(key,watch.id,cents,now).run();
+  return {key,priceCents:cents,changed:!prev || prev.price_cents!==cents};
+}
+export async function previousIndicationAlert(db,key){
+  const row=await db.prepare('SELECT last_price_cents FROM indication_alerts WHERE indication_key=?').bind(key).first();
+  return row ? row.last_price_cents : null;
+}
+export async function markIndicationAlert(db,key,cents,now){
+  await db.prepare(`INSERT INTO indication_alerts(indication_key,last_price_cents,last_sent_at) VALUES (?,?,?)
+  ON CONFLICT(indication_key) DO UPDATE SET last_price_cents=excluded.last_price_cents,last_sent_at=excluded.last_sent_at`)
+    .bind(key,cents,now).run();
+}

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {parseRss} from '../src/sources/rss.mjs';
+import {parseProductLd} from '../src/sources/product-ld.mjs';
 import {collect} from '../src/sources/registry.mjs';
 import {matchesModel,capacityOf,watchFor,normalizeOffer,qualifies} from '../src/core/match.mjs';
 import {activeWatches} from '../src/config.mjs';
@@ -18,6 +19,7 @@ const validOffer = {
 function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_indications.sql',import.meta.url),'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);
@@ -101,7 +103,11 @@ test('end-to-end manual ingest persists prices and sends alerts once per lower p
 test('RSS collector stores leads but cannot trigger purchase alert, including on repeat', async()=>{
   const env={DB:fakeD1()};
   const rss=`<rss><channel><item><guid>offer1</guid><title>iPhone 17 Pro Max promotion</title><link>https://www.dealabs.com/bons-plans/offer1</link></item></channel></rss>`;
-  const getFeed=async()=>new Response(rss,{status:200,headers:{'content-type':'text/xml'}});
+  const getFeed=async(url)=>{
+    if(String(url).includes('dealabs.com'))return new Response(rss,{status:200,headers:{'content-type':'text/xml'}});
+    const product=JSON.stringify({'@type':'Product',name:'Apple iPhone 17 Pro Max 256 Go',offers:{'@type':'Offer',priceCurrency:'EUR',price:1250,itemCondition:'https://schema.org/NewCondition',availability:'https://schema.org/InStock',seller:{name:'Test marchand'}}});
+    return new Response('<script type="application/ld+json">'+product+'</script>',{status:200,headers:{'content-type':'text/html'}});
+  };
   let r=await runScheduled(env,getFeed);
   assert.equal(r.leadsAdded,1);
   assert.equal(r.offersSeen,0);
@@ -126,4 +132,58 @@ test('unauthorized requests and public health checks',async()=>{
   assert.equal((await worker.fetch(new Request('https://worker.example/health'),env)).status,200);
   const req=new Request('https://worker.example/api/v1/ingest',{method:'POST',headers:{authorization:'Bearer top-secret'},body:JSON.stringify({source:'foo',offers:[validOffer]})});
   assert.equal((await worker.fetch(req,env)).status,400);
+});
+
+
+test('real retailer Product JSON-LD is identified, other models and refurbished rejected',()=>{
+  const source={url:'https://www.materiel.net/produit/202509100081.html'};
+  const p=(condition='NewCondition',price=1379)=>'<script type="application/ld+json">'+JSON.stringify({
+    '@type':'Product',name:'Apple iPhone 17 Pro Max Orange Cosmique - 256 Go',
+    offers:{price,priceCurrency:'EUR',availability:'https://schema.org/InStock',
+      itemCondition:'https://schema.org/'+condition,seller:{name:'Materiel.net'}}
+  })+'</script>';
+  assert.equal(parseProductLd(p(),source)[0].price_eur,1379);
+  assert.equal(parseProductLd(p(),source)[0].shipping_eur,null);
+  assert.throws(()=>parseProductLd(p('UsedCondition'),source),/no eligible/);
+  assert.throws(()=>parseProductLd(p('NewCondition',-1),source),/no eligible/);
+});
+
+test('merchant indicative prices persist without fabricating delivered price',async()=>{
+  const env={DB:fakeD1(),WATCH_MAX_EUR:'1100'};
+  const product=JSON.stringify({'@type':'Product',name:'Apple iPhone 17 Pro Max 256 Go',offers:{
+    price:'1255.55',priceCurrency:'EUR',availability:'https://schema.org/InStock',
+    itemCondition:'https://schema.org/NewCondition',seller:{name:'RDC marchand'}}});
+  const feed=async(url)=>new Response(String(url).includes('dealabs.com')?'<rss><channel></channel></rss>':
+    '<script type="application/ld+json">'+product+'</script>',{status:200});
+  await runScheduled(env,feed);
+  const indications=(await env.DB.prepare('SELECT * FROM indications').bind().all()).results;
+  assert.equal(indications.length,2);
+  assert.equal(indications[0].shipping_status,'unknown');
+  const confirmed=(await env.DB.prepare('SELECT * FROM offers').bind().all()).results;
+  assert.equal(confirmed.length,0);
+  const view=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
+  assert.equal(view.status,200);
+  assert.equal((await view.json()).indications.length,2);
+});
+
+import {telegramNotify,telegramLeadNotify,indicationNotify} from '../src/core/notify.mjs';
+
+test('ntfy fallback sends only clearly labelled price information',async()=>{
+ const urls=[];
+ const fakeFetch=async(url,options)=>{
+   urls.push({url,body:options.body,header:options.headers['X-Title']});
+   return new Response('{"id":"test"}',{status:200});
+ };
+ const env={NTFY_TOPIC:'pw_ip17_12345678901234567890123456789012'};
+ const watch=activeWatches({})[0];
+ const a=await telegramNotify(env,{...normalizeOffer(validOffer,watch,'web-augmente'),sourceId:'web-augmente'},watch,fakeFetch);
+ assert.equal(a.sent,true);
+ assert.match(urls[0].body,/livraison incluse/);
+ const b=await telegramLeadNotify(env,{title:'iPhone 17 Pro Max 256 Go',url:'https://www.dealabs.com/a'},watch,fakeFetch);
+ assert.equal(b.sent,true);
+ assert.match(urls[1].body,/non vérifiée/);
+ const c=await indicationNotify(env,{...validOffer,price_eur:990},watch,fakeFetch);
+ assert.equal(c.sent,true);
+ assert.match(urls[2].body,/livraison NON vérifiée/);
+ assert.equal(urls.length,3);
 });
