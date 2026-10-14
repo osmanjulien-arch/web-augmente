@@ -376,3 +376,8 @@ test('unavailable product is a valid zero-offer scan, not a fake in-stock listin
  availability:'https://schema.org/BackOrder',itemCondition:'https://schema.org/NewCondition',seller:{name:'LDLC'}}})+'</script>';
  assert.deepEqual(parseProductLd(body,{url:'https://www.ldlc.com/fiche/abc',allowUnavailable:true}),[]);
 });
+
+test("browser dashboard code parses after catalog filter modifications",async()=>{
+  const {js}=await import("../src/dashboard.mjs");
+  assert.doesNotThrow(()=>new Function(js));
+});
