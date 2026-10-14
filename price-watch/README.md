@@ -2,7 +2,7 @@
 
 Moteur de veille de prix pour **Cloudflare Workers + D1**, sans ChatGPT Tasks, fonctionnant en Cron **une fois par heure (UTC)**. Sources RSS (découverte), JSON (prix structurés), API Web Augmenté (push). Notifications Telegram : piste RSS clairement signalée comme non vérifiée, ou prix déclaré inférieur au seuil avec dédoublonnage et nouvelle baisse d'au moins 1 €.
 
-**État : MVP testable, non déployé.** Aucun marchand ni comparateur n'est encore branché en source de prix fiable. Le seul flux activé est le RSS Dealabs Téléphonie ; sa disponibilité réelle doit être vérifiée après déploiement. Un RSS ne prouve ni le prix final ni la disponibilité du produit. Les pistes RSS nouvelles peuvent envoyer un message Telegram clairement identifié **non vérifié** (désactiver avec `ALERT_RSS_LEADS=false`).
+**Status: Cloudflare Worker and D1 deployed; API and Telegram setup pending.**
 
 ## Modules
 
@@ -75,3 +75,9 @@ curl -X POST "https://<ton-worker>.workers.dev/api/v1/ingest" \
 ## Ajouter un second produit
 
 Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` unique, un `model` et une capacité précise. Les mêmes adaptateurs et règles s'appliquent automatiquement. Adapter si besoin la stratégie de matching pour les autres marques.
+
+## Deployment 2026-10-14
+- Health: https://wa-price-watch.osmanjulien-arch.workers.dev/health
+- Isolated worker: wa-price-watch; D1: price-watch-db (WEUR); Cron: hourly UTC.
+- API_TOKEN and Telegram secrets not configured; private API returns 401 and no notification delivery is active.
+- Feed parsing verified locally; production cron execution not yet independently confirmed.
