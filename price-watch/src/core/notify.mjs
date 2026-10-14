@@ -54,7 +54,7 @@ export async function ntfyNotify(env,title,message,link,fetchImpl=fetch){
      (safeOfferUrl?'; view, Voir l offre, '+safeOfferUrl:'');
   const res=await fetchImpl('https://ntfy.sh/'+env.NTFY_TOPIC,{
     method:'POST', headers:{
-      'Content-Type':'text/plain; charset=utf-8','X-Title':title.slice(0,150),
+      'Content-Type':'text/plain; charset=utf-8','X-Title':title.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').replace(/[^\x20-\x7E]/g,'').slice(0,150),
       'X-Click':DASHBOARD_URL,'X-Actions':actions,'X-Priority':'default'
     },body:message.slice(0,3500),signal:AbortSignal.timeout(10000)
   });

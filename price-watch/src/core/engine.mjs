@@ -56,15 +56,27 @@ export async function runScheduled(env, fetchImpl=fetch) {
   const now = new Date().toISOString();
   const result = newResult();
   const watches = activeWatches(env);
-  for (const source of sources.filter(s=>s.enabled)) {
-    try {
-      const data = await collect(source,fetchImpl);
+  let rssAttempted=0;
+  const enabledSources=sources.filter(s=>s.enabled);
+  // Concurrent network fetch, SERIAL database processing. Keeps alerts deduplicated
+  // while avoiding Cloudflare waitUntil timeout on large catalogs.
+  for(let i=0;i<enabledSources.length;i+=6){
+    const batch=await Promise.all(enabledSources.slice(i,i+6).map(async source=>{
+      try{return {source,data:await collect(source,fetchImpl)};}
+      catch(error){return {source,error};}
+    }));
+    for(const entry of batch){
+      const source=entry.source;
+      try {
+      if(entry.error)throw entry.error;
+      const data=entry.data;
       if (data.kind === 'lead') {
         for (const item of data.items) {
           const watch = watchFor(item,watches,true);
           if (watch && await saveLead(env.DB,item,watch,source.id,now)) {
             result.leadsAdded++;
-            if (env.ALERT_RSS_LEADS === 'true' && result.leadsNotified < 5 && eligibleRecentLead(item,source,now)) {
+            if (env.ALERT_RSS_LEADS === 'true' && rssAttempted < 1 && eligibleRecentLead(item,source,now)) {
+              rssAttempted++; // Bound ntfy submissions even when provider rate-limits.
               try {
                 const out = await telegramLeadNotify(env,item,watch);
                 if (out.sent) result.leadsNotified++;
@@ -95,6 +107,7 @@ export async function runScheduled(env, fetchImpl=fetch) {
       result.sourceFailed++;
       await saveSourceHealth(env.DB,source.id,now,false,0).catch(()=>{});
       result.errors.push(`${source.id}: ${String(e.message).slice(0,160)}`);
+    }
     }
   }
   await saveRun(env.DB,result,now,new Date().toISOString());
