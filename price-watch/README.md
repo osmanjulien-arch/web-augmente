@@ -1,0 +1,144 @@
+# Price Watch — moteur autonome et modulaire
+
+Moteur de veille de prix pour **Cloudflare Workers + D1**, sans ChatGPT Tasks, fonctionnant en Cron **une fois par heure (UTC)**. Sources RSS (découverte), JSON (prix structurés), API Web Augmenté (push). Notifications Telegram : piste RSS clairement signalée comme non vérifiée, ou prix déclaré inférieur au seuil avec dédoublonnage et nouvelle baisse d'au moins 1 €.
+
+**Status: Cloudflare Worker and D1 deployed; API and Telegram setup pending.**
+
+## Modules
+
+- `src/config.mjs` : catalogue des produits suivis, seuils et sources.
+- `src/sources/rss.mjs` : lecture RSS/Atom en mode annonces/pistes. Parseur volontairement minimal (pas un parseur XML généraliste).
+- `src/sources/registry.mjs` : registre des adaptateurs `rss` et `json`.
+- `src/sources/http.mjs` : collecte HTTPS avec hôte autorisé, limite de taille et délai.
+- `src/core/match.mjs` : identification des variantes et calcul du prix livré.
+- `src/core/storage.mjs` : offres, historique, pistes RSS, alertes, journaux.
+- `src/core/notify.mjs` : canal Telegram (extensible).
+- `src/core/engine.mjs` : orchestration et filtrage.
+- `src/worker.mjs` : Cron et API HTTP authentifiée.
+
+## Mise en route
+
+Pré-requis : Node 20+, accès Cloudflare avec Workers et D1, `npm install`.
+
+1. `npm install && npm test`
+2. `npx wrangler login` (sur ton ordinateur, jamais dans le chat).
+3. `npx wrangler d1 create price-watch-db` puis remplacer `REPLACE_WITH_D1_DATABASE_ID` dans `wrangler.jsonc` par l'ID affiché.
+4. `npm run db:remote` pour créer les tables dans D1.
+5. Créer un secret long et aléatoire : `npx wrangler secret put API_TOKEN`.
+6. Pour Telegram : créer un bot via BotFather, obtenir son `chat_id`, puis `npx wrangler secret put TELEGRAM_BOT_TOKEN` et `npx wrangler secret put TELEGRAM_CHAT_ID`.
+7. `npm run deploy`.
+8. Vérifier `https://<ton-worker>.workers.dev/health`, puis exécuter un premier `POST /api/v1/run` authentifié.
+
+Le cron `0 * * * *` fonctionne **à l'heure UTC**, pas à l'heure de Paris. Pour un autre intervalle, modifier `wrangler.jsonc`.
+
+## API (toutes les routes `/api` demandent `Authorization: Bearer <API_TOKEN>`)
+
+| Route | Fonction |
+|---|---|
+| `GET /health` | Statut sans secrets |
+| `GET /api/v1/watches` | Produits et seuils configurés |
+| `GET /api/v1/offers?watch=iphone-17-pro-max-256` | Offres de prix observées, triées par prix livré |
+| `GET /api/v1/leads?watch=...` | Annonces RSS (non vérifiées) |
+| `GET /api/v1/history?watch=...` | Historique des variations de prix |
+| `GET /api/v1/runs` | Exécutions et erreurs récentes |
+| `POST /api/v1/run` | Déclenchement immédiat de la collecte |
+| `POST /api/v1/ingest` | Ajout authentifié de prix par Web Augmenté |
+
+Exemple d'ingestion **de test**, avec marchand et adresse fictifs :
+
+```bash
+curl -X POST "https://<ton-worker>.workers.dev/api/v1/ingest" \
+  -H "Authorization: Bearer $API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"source":"web-augmente","offers":[{"title":"Apple iPhone 17 Pro Max 256 Go","capacity_gb":256,"condition":"new","currency":"EUR","merchant":"Magasin de démonstration","url":"https://example.org/iphone","price_eur":1090.0,"shipping_eur":0}]}'
+```
+
+**Attention : l'exemple pourrait envoyer une vraie alerte de test si Telegram est configuré.** Ne pas le confondre avec un prix réel.
+
+## Brancher des données réellement utilisables
+
+- **RSS** : découverte de nouveaux bons plans ; ajouter une source `rss` HTTPS dans `src/config.mjs`. Chaque offre reste une *piste*, même si le titre contient un prix.
+- **Flux JSON autorisé** : ajouter une source `json` avec HTTPS et `allowedHost`, endpoint renvoyant `{ "offers": [ ... ] }`, avec les mêmes champs que l'API d'ingestion.
+- **Safari Web Augmenté** : un script utilisateur optionnel pourra transmettre une offre structurée par `POST /api/v1/ingest`, après autorisation explicite de partage. **Ce script n'est pas inclus dans cette version** ; aucun accès automatique au navigateur n'est présumé.
+- **Alertes idealo** : fonction native à garder comme filet de sécurité ; ce prototype n'interroge pas automatiquement idealo et n'utilise aucune API privée.
+
+## Garanties et limites
+
+- Produit strict : iPhone **17 Pro Max** (ni 17 Pro, ni accessoires), **256 Go** uniquement, état `new`, devise EUR, frais de livraison obligatoirement précisés, seuil par défaut **1 100 € livré**.
+- Un résultat JSON/manual est un *prix déclaré par la source*, pas une transaction garantie. Vérifier prix et disponibilité sur la page vendeur avant achat.
+- Aucune suppression ni modification du Worker Web Augmenté existant, aucun ordre d'achat.
+- API protégée par `API_TOKEN`. Pas de clé inscrite dans le dépôt ; jamais exposer le jeton API dans du code Safari public. Pour connecter Safari, prévoir un relais authentifié ou un jeton limité côté serveur.
+- Les flux doivent être consultés dans le respect de leurs conditions d'utilisation. Pas de contournement de protection, pas de scraping non autorisé.
+- Workers/D1 restent soumis à leurs propres quotas. HTTP limité à HTTPS, hôte autorisé, 600 Ko, timeout 10 s, redirections refusées.
+- Cron et ingestion peuvent exécuter des écritures concurrentes ; pour de gros volumes ou du multiutilisateur, ajouter une file et une déduplication transactionnelle des notifications.
+- Les erreurs des sources sont visibles via `GET /api/v1/runs`. La disponibilité réelle des flux et l'envoi Telegram exigent un test sur infrastructure connectée.
+
+## Ajouter un second produit
+
+Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` unique, un `model` et une capacité précise. Les mêmes adaptateurs et règles s'appliquent automatiquement. Adapter si besoin la stratégie de matching pour les autres marques.
+
+## Deployment 2026-10-14
+- Health: https://wa-price-watch.osmanjulien-arch.workers.dev/health
+- Isolated worker: wa-price-watch; D1: price-watch-db (WEUR); Cron: hourly UTC.
+- API_TOKEN and Telegram secrets not configured; private API returns 401 and no notification delivery is active.
+- Feed parsing verified locally; production cron execution not yet independently confirmed.
+
+## Sources automatiques et alertes push — 14 octobre 2026
+
+- Merchant JSON-LD collect: Materiel.net (iPhone 17 Pro Max 256 Go orange) and Rue du Commerce (iPhone 17 Pro Max 256 Go argent). Do not assume the advertised price includes shipping; observations go to the `indications` table, not confirmed delivered-price offers.
+- New public read-only endpoint: `GET /api/v1/public` with source timestamps, stated shipping uncertainty, and last run diagnostics. No API token is exposed.
+- Price signals below configured threshold may be sent via ntfy, with clear mention that shipping is not confirmed. Existing confirmed-price and RSS lead alerts use ntfy if Telegram is not configured.
+- ntfy has a random topic deployed as a Cloudflare secret; subscription requires a one-time user action in the ntfy iOS app. The topic name is stored separately on the user's device at `Documents/PriceWatch-Build-20261014/ntfy-topic.txt`. Do not commit the topic to the public repository.
+- Product-page polling remains limited by the merchants' website conditions and anti-bot controls. If source fetching fails, failures are recorded rather than fabricated values.
+
+## Extension enseignes (octobre 2026)
+
+- Sources actives validées depuis Cloudflare : Dealabs RSS ; Materiel.net (orange), Rue du Commerce (argent), LDLC (bleu), MacWay (bleu). Les fiches Boulanger (orange et bleu) sont désactivées car les requêtes Cloudflare ont échoué (réponses non exploitables puis HTTP 400). LDLC argent est désactivé car en réapprovisionnement ; MacWay argent car son JSON-LD n'atteste pas l'état neuf.
+- Boulanger ne fournit pas systématiquement l'identité du vendeur dans le JSON-LD : un vendeur de repli Boulanger est accepté uniquement avec une preuve textuelle explicite « produit neuf vendu et expédié par Boulanger » et un JSON-LD NewCondition/InStock.
+- Fnac, Darty : accès automatisé refusé (403) lors des essais ; pas de contournement.
+- Cdiscount : l'HTML accessible par le collecteur ne contient pas de fiche Product JSON-LD exploitable ; pas de prix automatique.
+- Amazon : la recherche ne fournit pas de prix structuré marchand suffisamment fiable ; une API autorisée/flux partenaire serait nécessaire.
+- Auchan : pas de JSON-LD Product exploitable lors des essais ; non actif.
+- Un prix affiché n'est **pas** un prix livraison comprise. Les alertes de piste signalent explicitement cette incertitude.
+
+## Traçabilité des sources
+
+Le point de consultation public /api/v1/public expose désormais source_health : date du dernier passage, dernière réussite et état ok/error. Une erreur de collecte ne signifie pas une hausse ou une baisse du prix. Aucune donnée de livraison ne doit être inventée.
+
+## Tableau mobile et notifications (v0.2, 2026-10-14)
+
+- Interface responsive : `GET /dashboard` ou `GET /`, avec fichiers statiques servis par le même Worker (`/dashboard.css`, `/dashboard.js`), sans dépendance externe.
+- Lecture seule : cartes prix marchand avec photos HTTPS si disponibles, classement, prix cible, comparaison visuelle, historique des *variations réelles*, signalements RSS et santé des sources. Aucun faux historique généré.
+- `GET /api/v1/public` : ajoute `image_url`, `history`, `leads`, `confirmed`. Masque les sources désactivées ; état et horodatage présents.
+- Photos provenant des métadonnées Product JSON-LD des marchands, avec liste stricte de domaines autorisés, migration `0004_product_image.sql`.
+- ntfy : ouverture du tableau au toucher via `X-Click`, actions explicites « Voir le tableau » et « Voir l'offre » ; la URL marchande reste affichée dans le message.
+- Les alertes gratuites idealo/Dealabs sont accessibles depuis le tableau pour élargir la surveillance. Leur activation se fait chez le fournisseur par l'utilisateur : **elles ne sont pas ingérées automatiquement** dans le Worker, faute d'API/autorisation ou connecteur d'emails paramétré.
+- Les pages et API de consultation sont publiques sans données personnelles. Le topic ntfy aléatoire est un secret ; ne pas le publier dans le dépôt. L'API d'écriture reste privée (et refuse toute ingestion tant que `API_TOKEN` n'a pas été paramétré).
+
+
+## Extension gratuite sans clé d'API
+
+- 3 nouveaux flux RSS publics opérationnels : **Dealabs Apple**, **Frandroid Bons Plans**, **iGeneration Apple**. Le flux Google Actualités, testé depuis Windows mais bloqué en HTTP 503 depuis Cloudflare, est laissé désactivé. Les liens gratuits Google Alertes/idealo/LeDénicheur restent accessibles depuis le tableau.
+- Ces nouvelles sources signalent les publications pertinentes, **pas les prix marchands livrés**. Elles apparaissent comme pistes RSS avec un lien vers leur source. Ne jamais fabriquer un prix de vente à partir du titre d'un article.
+- Pour les notifications de ces sources, l'article doit avoir une date de publication vérifiable et récente (2 à 3 jours), et les titres Google Actualités doivent contenir un indice de promotion/prix. Pas d'alerte immédiate sur des articles anciens.
+- Le tableau affiche les **sources des signalements**, les comparateurs idealo / LeDénicheur et les alertes gratuites Google Alertes / Dealabs comme compléments manuels (non synchronisés dans D1).
+- Sources interdites/inaccessibles : Fnac/Darty HTTP 403, Boulanger HTTP 400 depuis Cloudflare, Amazon/Cdiscount sans flux prix autorisé. Aucun contournement. Un agrégateur complet de prix de marché ne peut pas être garanti gratuitement à partir de ces seules sources.
+- Si un fournisseur propose ultérieurement un flux RSS gratuit et autorisé avec URL directe, ajouter sa configuration après vérification de la licence et de la qualité, sans modifier le moteur.
+
+## Catalogue multi-familles — 14/10/2026
+
+- iPhone Pro Max **16, 17, 18**, profils générés pour les capacités 128, 256, 512 Go, 1 To et 2 To. Certaines combinaisons peuvent ne pas exister commercialement ; aucun faux résultat n'est créé pour elles.
+- Mac mini / Mac Studio Apple Silicon, mémoire unifiée **>=32 Go** pour entrer dans la veille des LLM quantifiés Q4. Les catégories mémoire estimées sont 30B (32 Go+), 70B (64 Go+), 120B (128 Go+) et 200B (256 Go+). **La classification n'est PAS une mesure de débit ou de qualité réelle des modèles** et dépend de la quantification, de la fenêtre de contexte, du cache KV, du runtime et de la mémoire laissée au système.
+- Alertes : seul le **17 Pro Max 256 Go** garde le seuil initial 1 100 € (à titre indicatif). Sur toutes les autres variantes, la première observation sert de référence ; notification en cas de baisse d'au moins **5 % et 100 €**. Aucun seuil d'achat non demandé n'a été inventé.
+- Fiches commerciales nouvelles via LDLC : 16 Pro Max 256/512 (neuf absent sur les offres captées), 17 Pro Max 1 To (en rupture), 18 Pro Max 256/512/2 To, Mac mini 32/48/64 Go, Mac Studio M5 Max 36 Go, M4 Max 64/128 Go, M3 Ultra 512 Go et M2 Ultra 128 Go. Les sources marquées allowUnavailable=true renvoient zéro offre lorsqu'il n'y a pas de produit neuf immédiatement disponible ; pas de faux état « en stock ».
+- Le tableau comprend des filtres de familles/générations/capacités/taille du modèle Q4 ; les prix disponibles de Mac **ne garantissent pas que tous les modèles 30 à 200B soient vendus à l'instant**. Les prix publiés restent hors frais de livraison inconnus.
+- Intégration indépendante, pas de fusion avec le projet Safari.
+
+## Validation de production du catalogue
+
+- Version stable publiée sur `wa-price-watch` : vérification D1 distante effectuée, **20 sources actives, 20 réussites et 0 erreur** après correction de la collecte parallèle (6 collectes HTTP en parallèle, écriture D1 séquentielle).
+- Les trois URL LDLC correspondant à des Mac Studio M4 Max 128 Go, M3 Ultra 512 Go, M2 Ultra 128 Go n'exposent plus de fiche de produit structurée utilisable ; elles sont **désactivées** (pas de fausse disponibilité).
+- Résultats effectivement relevés : quatre offres iPhone 17 Pro Max 256 Go ; iPhone 18 Pro Max 2 To (LDLC) ; Mac Studio M5 Max **36 Go RAM** (LDLC, classement indicatif 30B Q4).
+- Mac mini surveillés : M6 32 Go et M5 Pro 48/64 Go ; aucune offre immédiatement disponible confirmée lors de ce contrôle. 
+- **Aucune offre Mac 256 Go ou plus n'est confirmée** à la date du premier scan ; le filtre 200B reste vide tant qu'une fiche marchande autorisée ne donne pas de prix et disponibilité.
+- RSS limité à une tentative de notification par exécution pour éviter les refus de débit ntfy. Les baisses de prix restent prioritaires et distinctes.
+- Tableau mobile chargé dans Chrome : prix et dernière collecte affichés. 25 tests automatisés, dont vérification de syntaxe du script destiné au navigateur.
