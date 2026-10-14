@@ -20,6 +20,7 @@ function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0002_indications.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0003_source_health.sql',import.meta.url),'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);
@@ -157,13 +158,13 @@ test('merchant indicative prices persist without fabricating delivered price',as
     '<script type="application/ld+json">'+product+'</script>',{status:200});
   await runScheduled(env,feed);
   const indications=(await env.DB.prepare('SELECT * FROM indications').bind().all()).results;
-  assert.equal(indications.length,2);
+  assert.equal(indications.length,5);
   assert.equal(indications[0].shipping_status,'unknown');
   const confirmed=(await env.DB.prepare('SELECT * FROM offers').bind().all()).results;
   assert.equal(confirmed.length,0);
   const view=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
   assert.equal(view.status,200);
-  assert.equal((await view.json()).indications.length,2);
+  assert.equal((await view.json()).indications.length,5);
 });
 
 import {telegramNotify,telegramLeadNotify,indicationNotify} from '../src/core/notify.mjs';
@@ -186,4 +187,56 @@ test('ntfy fallback sends only clearly labelled price information',async()=>{
  assert.equal(c.sent,true);
  assert.match(urls[2].body,/livraison NON vérifiée/);
  assert.equal(urls.length,3);
+});
+
+
+test('Boulanger fallback seller requires explicit new product and actual seller proof',()=>{
+  const source={id:'boulanger-orange',url:'https://www.boulanger.com/ref/1226095',
+    allowedHost:'www.boulanger.com',sellerFallback:'Boulanger',requireSellerProof:true};
+  const ld=(condition='NewCondition')=>'<script type="application/ld+json">'+JSON.stringify({
+    '@type':'Product',name:'Smartphone APPLE iPhone 17 Pro Max 5G 256Go Orange cosmique',
+    offers:{'@type':'Offer',price:'1379.0',priceCurrency:'EUR',
+      availability:'https://schema.org/InStock',itemCondition:condition}
+  })+'</script>';
+  const proof='<span>produit  neuf</span> vendu &amp; expédié par <span title="boulanger">boulanger</span>';
+  assert.equal(parseProductLd(proof+ld(),source)[0].merchant,'Boulanger');
+  assert.throws(()=>parseProductLd(ld(),source),/no eligible/);
+  assert.throws(()=>parseProductLd(proof+ld('UsedCondition'),source),/no eligible/);
+  const ldlcSource={url:'https://www.ldlc.com/fiche/PB00702830.html'};
+  assert.throws(()=>parseProductLd(proof+ld(),ldlcSource),/no eligible/);
+});
+
+test('out-of-stock new product is excluded rather than advertised as available',()=>{
+  const src={url:'https://www.ldlc.com/fiche/PB00702830.html'};
+  const html='<script type="application/ld+json">'+JSON.stringify({'@type':'Product',
+    name:'Apple iPhone 17 Pro Max 256 Go Argent',
+    offers:{price:1379,priceCurrency:'EUR',itemCondition:'https://schema.org/NewCondition',
+      availability:'https://schema.org/BackOrder',seller:{name:'LDLC'}}})+'</script>';
+  assert.throws(()=>parseProductLd(html,src),/no eligible/);
+});
+
+
+test('source health preserves last success when a merchant begins refusing requests',async()=>{
+  const {saveSourceHealth}=await import('../src/core/storage.mjs');
+  const db=fakeD1();
+  await saveSourceHealth(db,'merchant-x','2026-10-14T18:00:00Z',true,1);
+  await saveSourceHealth(db,'merchant-x','2026-10-14T19:00:00Z',false,0);
+  const row=await db.prepare('SELECT * FROM source_health WHERE source_id=?').bind('merchant-x').first();
+  assert.equal(row.state,'error');
+  assert.equal(row.last_ok,'2026-10-14T18:00:00Z');
+  assert.equal(row.last_items,1);
+});
+
+test('public endpoint exposes per-source freshness and failures',async()=>{
+ const env={DB:fakeD1()};
+ const mock=async url=>{
+  if(String(url).includes('dealabs.com'))return new Response('<rss><channel></channel></rss>',{status:200});
+  return new Response(JSON.stringify({error:'blocked'}),{status:403});
+ };
+ const result=await runScheduled(env,mock);
+ assert.equal(result.sourceFailed,5);
+ const response=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
+ const json=await response.json();
+ assert.equal(json.source_health.length,6);
+ assert.equal(json.source_health.filter(x=>x.state==='error').length,5);
 });

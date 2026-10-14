@@ -89,3 +89,17 @@ Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` 
 - Price signals below configured threshold may be sent via ntfy, with clear mention that shipping is not confirmed. Existing confirmed-price and RSS lead alerts use ntfy if Telegram is not configured.
 - ntfy has a random topic deployed as a Cloudflare secret; subscription requires a one-time user action in the ntfy iOS app. The topic name is stored separately on the user's device at `Documents/PriceWatch-Build-20261014/ntfy-topic.txt`. Do not commit the topic to the public repository.
 - Product-page polling remains limited by the merchants' website conditions and anti-bot controls. If source fetching fails, failures are recorded rather than fabricated values.
+
+## Extension enseignes (octobre 2026)
+
+- Sources actives (en attente de validation depuis Cloudflare) : Dealabs RSS ; fiches neuves Materiel.net, Rue du Commerce, Boulanger (orange et bleu) et LDLC (bleu). La fiche LDLC argent est volontairement désactivée : offre en réapprovisionnement au contrôle initial.
+- Boulanger ne fournit pas systématiquement l'identité du vendeur dans le JSON-LD : un vendeur de repli Boulanger est accepté uniquement avec une preuve textuelle explicite « produit neuf vendu et expédié par Boulanger » et un JSON-LD NewCondition/InStock.
+- Fnac, Darty : accès automatisé refusé (403) lors des essais ; pas de contournement.
+- Cdiscount : l'HTML accessible par le collecteur ne contient pas de fiche Product JSON-LD exploitable ; pas de prix automatique.
+- Amazon : la recherche ne fournit pas de prix structuré marchand suffisamment fiable ; une API autorisée/flux partenaire serait nécessaire.
+- Auchan : pas de JSON-LD Product exploitable lors des essais ; non actif.
+- Un prix affiché n'est **pas** un prix livraison comprise. Les alertes de piste signalent explicitement cette incertitude.
+
+## Traçabilité des sources
+
+Le point de consultation public /api/v1/public expose désormais source_health : date du dernier passage, dernière réussite et état ok/error. Une erreur de collecte ne signifie pas une hausse ou une baisse du prix. Aucune donnée de livraison ne doit être inventée.

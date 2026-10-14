@@ -2,6 +2,12 @@
 export function parseProductLd(html, source) {
   if (typeof html !== 'string' || html.length > 800000) throw new Error('invalid product HTML');
   const out=[];
+  // Conditional fallback for Boulanger only; never infer a seller from
+  // a product title or from a retailer's domain alone.
+  const merchantProof = source.requireSellerProof === true &&
+    source.allowedHost === 'www.boulanger.com' &&
+    source.sellerFallback === 'Boulanger' &&
+    /produit\s+neuf<\/span>\s*vendu\s+&amp;\s*expédié\s+par[\s\S]{0,180}title=["']boulanger["']/i.test(html);
   const scripts=html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
   for (const m of scripts) {
     let root;
@@ -20,7 +26,8 @@ export function parseProductLd(html, source) {
           const price=Number(offer.price);
           if (!Number.isFinite(price)||price<1||price>100000) continue;
           const name=String(product.name||'').replace(/<[^>]*>/g,'').trim();
-          const seller=String(offer.seller?.name||'').trim();
+          const seller=String(offer.seller?.name ||
+            (merchantProof ? source.sellerFallback : '')).trim();
           if (!name || !seller) continue;
           out.push({title:name,merchant:seller,condition:'new',currency:'EUR',price_eur:price,
             url:source.url,shipping_eur:null});

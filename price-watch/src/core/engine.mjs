@@ -1,6 +1,6 @@
 import {activeWatches,sources} from '../config.mjs';
 import {watchFor,normalizeOffer,qualifies} from './match.mjs';
-import {saveLead,saveOffer,lastAlertPrice,markAlert,saveRun,saveIndication,previousIndicationAlert,markIndicationAlert} from './storage.mjs';
+import {saveLead,saveOffer,lastAlertPrice,markAlert,saveRun,saveIndication,previousIndicationAlert,markIndicationAlert,saveSourceHealth} from './storage.mjs';
 import {telegramNotify,telegramLeadNotify,indicationNotify} from './notify.mjs';
 import {collect} from '../sources/registry.mjs';
 
@@ -78,8 +78,10 @@ export async function runScheduled(env, fetchImpl=fetch) {
         }
       } else await storePrices(data.items,source.id,env,result,now);
       result.sourceOk++;
+      await saveSourceHealth(env.DB,source.id,now,true,data.items.length);
     } catch (e) {
       result.sourceFailed++;
+      await saveSourceHealth(env.DB,source.id,now,false,0).catch(()=>{});
       result.errors.push(`${source.id}: ${String(e.message).slice(0,160)}`);
     }
   }

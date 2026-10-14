@@ -16,7 +16,23 @@ export const sources = [
     allowedHost:'www.materiel.net', enabled:true },
   { id:'rueducommerce-argent', type:'product-ld',
     url:'https://www.rueducommerce.fr/p/r25099019850.html',
-    allowedHost:'www.rueducommerce.fr', enabled:true }
+    allowedHost:'www.rueducommerce.fr', enabled:true },
+  // Boulanger: JSON-LD lacks seller. The fallback is accepted only when
+  // the page explicitly states the product is new and sold by Boulanger.
+  { id:'boulanger-orange', type:'product-ld',
+    url:'https://www.boulanger.com/ref/1226095?offer=26284cfd-6b5a-44e8-a0d1-5bd6db904aaf',
+    allowedHost:'www.boulanger.com', sellerFallback:'Boulanger',
+    requireSellerProof:true, enabled:true },
+  { id:'boulanger-bleu', type:'product-ld',
+    url:'https://www.boulanger.com/ref/1227789',
+    allowedHost:'www.boulanger.com', sellerFallback:'Boulanger',
+    requireSellerProof:true, enabled:true },
+  { id:'ldlc-bleu', type:'product-ld',
+    url:'https://www.ldlc.com/fiche/PB00702832.html',
+    allowedHost:'www.ldlc.com', enabled:true },
+  { id:'ldlc-argent', type:'product-ld',
+    url:'https://www.ldlc.com/fiche/PB00702830.html',
+    allowedHost:'www.ldlc.com', enabled:false } // BackOrder at first check; re-enable when available.
   // { id: 'mon-comparateur', type: 'json',
   //   url: 'https://api.exemple.fr/prices.json', allowedHost:'api.exemple.fr', enabled: false }
 ];

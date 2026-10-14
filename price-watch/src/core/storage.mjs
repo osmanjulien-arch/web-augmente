@@ -78,3 +78,15 @@ export async function markIndicationAlert(db,key,cents,now){
   ON CONFLICT(indication_key) DO UPDATE SET last_price_cents=excluded.last_price_cents,last_sent_at=excluded.last_sent_at`)
     .bind(key,cents,now).run();
 }
+
+
+export async function saveSourceHealth(db,sourceId,checkedAt,ok,count=0){
+  await db.prepare(`INSERT INTO source_health
+  (source_id,last_checked,last_ok,state,last_items) VALUES (?,?,?,?,?)
+  ON CONFLICT(source_id) DO UPDATE SET
+    last_checked=excluded.last_checked,
+    last_ok=CASE WHEN excluded.state='ok' THEN excluded.last_ok ELSE source_health.last_ok END,
+    state=excluded.state,
+    last_items=CASE WHEN excluded.state='ok' THEN excluded.last_items ELSE source_health.last_items END`)
+  .bind(sourceId,checkedAt,ok?checkedAt:null,ok?'ok':'error',ok?count:0).run();
+}

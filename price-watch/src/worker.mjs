@@ -29,11 +29,13 @@ export default {
       if(!env.DB) return json({error:'database_not_bound'},503);
       const indications=await getRows(env.DB,
         'SELECT watch_id,source_id,merchant,title,url,price_cents,shipping_status,last_seen FROM indications ORDER BY price_cents ASC LIMIT 25');
+      const source_health=await getRows(env.DB,
+        'SELECT source_id,last_checked,last_ok,state,last_items FROM source_health ORDER BY source_id ASC LIMIT 30');
       const runs=await getRows(env.DB,
         'SELECT completed_at,source_ok,source_failed FROM runs ORDER BY id DESC LIMIT 1');
       return json({product:'iPhone 17 Pro Max 256 Go neuf',threshold_eur:Number(env.WATCH_MAX_EUR||1100),
         currency:'EUR',shipping_notice:'Prix affichés hors livraison, panier à vérifier',
-        indications,latest_run:runs[0]||null});
+        indications,source_health,latest_run:runs[0]||null});
     }
     if (!authorized(request,env)) return json({error:'unauthorized'},401);
     if (!env.DB) return json({error:'database_not_bound'},503);
