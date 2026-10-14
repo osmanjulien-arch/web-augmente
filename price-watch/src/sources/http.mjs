@@ -4,7 +4,7 @@ export async function fetchText(source, fetchImpl=fetch) {
     throw new Error(`source ${source.id}: HTTPS host not allowed`);
   }
   const result = await fetchImpl(url, {
-    method:'GET', redirect:'error', signal:AbortSignal.timeout(10000),
+    method:'GET', redirect:'manual', signal:AbortSignal.timeout(10000),
     headers:{'Accept':'application/xml, application/rss+xml, application/atom+xml, application/json, text/xml;q=0.9',
       'User-Agent':'WA-Price-Watch/0.1 (+private product monitoring)'}
   });
