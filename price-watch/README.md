@@ -113,3 +113,13 @@ Le point de consultation public /api/v1/public expose désormais source_health :
 - ntfy : ouverture du tableau au toucher via `X-Click`, actions explicites « Voir le tableau » et « Voir l'offre » ; la URL marchande reste affichée dans le message.
 - Les alertes gratuites idealo/Dealabs sont accessibles depuis le tableau pour élargir la surveillance. Leur activation se fait chez le fournisseur par l'utilisateur : **elles ne sont pas ingérées automatiquement** dans le Worker, faute d'API/autorisation ou connecteur d'emails paramétré.
 - Les pages et API de consultation sont publiques sans données personnelles. Le topic ntfy aléatoire est un secret ; ne pas le publier dans le dépôt. L'API d'écriture reste privée (et refuse toute ingestion tant que `API_TOKEN` n'a pas été paramétré).
+
+
+## Extension gratuite sans clé d'API
+
+- 3 nouveaux flux RSS publics opérationnels : **Dealabs Apple**, **Frandroid Bons Plans**, **iGeneration Apple**. Le flux Google Actualités, testé depuis Windows mais bloqué en HTTP 503 depuis Cloudflare, est laissé désactivé. Les liens gratuits Google Alertes/idealo/LeDénicheur restent accessibles depuis le tableau.
+- Ces nouvelles sources signalent les publications pertinentes, **pas les prix marchands livrés**. Elles apparaissent comme pistes RSS avec un lien vers leur source. Ne jamais fabriquer un prix de vente à partir du titre d'un article.
+- Pour les notifications de ces sources, l'article doit avoir une date de publication vérifiable et récente (2 à 3 jours), et les titres Google Actualités doivent contenir un indice de promotion/prix. Pas d'alerte immédiate sur des articles anciens.
+- Le tableau affiche les **sources des signalements**, les comparateurs idealo / LeDénicheur et les alertes gratuites Google Alertes / Dealabs comme compléments manuels (non synchronisés dans D1).
+- Sources interdites/inaccessibles : Fnac/Darty HTTP 403, Boulanger HTTP 400 depuis Cloudflare, Amazon/Cdiscount sans flux prix autorisé. Aucun contournement. Un agrégateur complet de prix de marché ne peut pas être garanti gratuitement à partir de ces seules sources.
+- Si un fournisseur propose ultérieurement un flux RSS gratuit et autorisé avec URL directe, ajouter sa configuration après vérification de la licence et de la qualité, sans modifier le moteur.

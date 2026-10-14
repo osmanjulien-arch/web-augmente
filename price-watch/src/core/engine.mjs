@@ -26,6 +26,17 @@ async function storePrices(items, sourceId, env, result, now) {
   }
 }
 
+export function eligibleRecentLead(item,source,now) {
+  if (!source.alertRecentDays) return true;
+  const published=Date.parse(item.publishedAt||'');
+  const checked=Date.parse(now);
+  if (!Number.isFinite(published)||!Number.isFinite(checked)) return false;
+  if(published>checked+60*60*1000)return false;
+  if(checked-published>source.alertRecentDays*24*60*60*1000)return false;
+  // News indexes need deal language; the RSS title remains only an unverified lead.
+  if(source.id==='google-news-iphone' && !/promo|promotion|r[ée]duction|offre|bon plan|prix|baisse|soldes|€|brad[eé]|remise|code promo|discount/i.test(item.title))return false;
+  return true;
+}
 function newResult() {
   return {sourceOk:0,sourceFailed:0,leadsAdded:0,offersSeen:0,alertsSent:0,
     notificationsPending:0,leadsNotified:0,indicationsSeen:0,errors:[]};
@@ -53,7 +64,7 @@ export async function runScheduled(env, fetchImpl=fetch) {
           const watch = watchFor(item,watches,true);
           if (watch && await saveLead(env.DB,item,watch,source.id,now)) {
             result.leadsAdded++;
-            if (env.ALERT_RSS_LEADS === 'true' && result.leadsNotified < 5) {
+            if (env.ALERT_RSS_LEADS === 'true' && result.leadsNotified < 5 && eligibleRecentLead(item,source,now)) {
               try {
                 const out = await telegramLeadNotify(env,item,watch);
                 if (out.sent) result.leadsNotified++;

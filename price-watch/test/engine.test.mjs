@@ -111,12 +111,12 @@ test('RSS collector stores leads but cannot trigger purchase alert, including on
     return new Response('<script type="application/ld+json">'+product+'</script>',{status:200,headers:{'content-type':'text/html'}});
   };
   let r=await runScheduled(env,getFeed);
-  assert.equal(r.leadsAdded,1);
+  assert.equal(r.leadsAdded,2);
   assert.equal(r.offersSeen,0);
   assert.equal(r.alertsSent,0);
   r=await runScheduled(env,getFeed);
   assert.equal(r.leadsAdded,0);
-  assert.equal((await env.DB.prepare('SELECT * FROM leads').bind().all()).results.length,1);
+  assert.equal((await env.DB.prepare('SELECT * FROM leads').bind().all()).results.length,2);
 });
 
 test('JSON source parser accepts structured feeds only; redirects are rejected',async()=>{
@@ -235,11 +235,11 @@ test('public endpoint exposes per-source freshness and failures',async()=>{
   return new Response(JSON.stringify({error:'blocked'}),{status:403});
  };
  const result=await runScheduled(env,mock);
- assert.equal(result.sourceFailed,4);
+ assert.equal(result.sourceFailed,6);
  const response=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
  const json=await response.json();
- assert.equal(json.source_health.length,5);
- assert.equal(json.source_health.filter(x=>x.state==='error').length,4);
+ assert.equal(json.source_health.length,8);
+ assert.equal(json.source_health.filter(x=>x.state==='error').length,6);
 });
 
 
@@ -309,4 +309,29 @@ test('dashboard API includes history, RSS leads and only active retailer rows',a
  assert.ok(Array.isArray(data.leads));
  assert.ok(Array.isArray(data.confirmed));
  assert.equal(data.indications.length,0);
+});
+
+
+
+test('validated RSS extensions are active; Google News blocked source remains disabled',async()=>{
+ const {sources}=await import('../src/config.mjs');
+ for(const id of ['dealabs-apple','frandroid-bons-plans','igeneration-apple']){
+  const x=sources.find(s=>s.id===id);
+  assert.equal(x?.enabled,true);
+  assert.equal(x.type,'rss');
+  assert.ok(x.alertRecentDays>=2);
+ }
+ assert.equal(sources.find(s=>s.id==='google-news-iphone')?.enabled,false);
+});
+
+test('recent lead notification filtering rejects outdated news and non-deal Google titles',async()=>{
+ const {eligibleRecentLead}=await import('../src/core/engine.mjs');
+ const now=new Date().toISOString();
+ const source={id:'google-news-iphone',alertRecentDays:2};
+ const recent=new Date(Date.now()-24*3600*1000).toUTCString();
+ const old=new Date(Date.now()-4*24*3600*1000).toUTCString();
+ assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max baisse de prix Amazon',publishedAt:recent},source,now),true);
+ assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max fiche technique',publishedAt:recent},source,now),false);
+ assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max promotion',publishedAt:old},source,now),false);
+ assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max promotion',publishedAt:null},source,now),false);
 });

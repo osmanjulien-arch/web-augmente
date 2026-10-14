@@ -50,7 +50,7 @@ export default {
       const history=await getRows(env.DB,
         'SELECT i.source_id,obs.price_cents,obs.observed_at FROM indication_observations obs JOIN indications i ON obs.indication_key=i.key ORDER BY obs.observed_at DESC LIMIT 180');
       const leads=await getRows(env.DB,
-        'SELECT title,url,first_seen FROM leads ORDER BY first_seen DESC LIMIT 10');
+        'SELECT source_id,title,url,first_seen FROM leads ORDER BY first_seen DESC LIMIT 30');
       const confirmed=await getRows(env.DB,
         'SELECT merchant,title,url,total_cents,last_seen FROM offers ORDER BY total_cents ASC LIMIT 12');
       const runs=await getRows(env.DB,
