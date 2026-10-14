@@ -1,5 +1,6 @@
 import {activeWatches,sources} from './config.mjs';
 import {runScheduled,ingestManual} from './core/engine.mjs';
+import {html as dashboardHtml,css as dashboardCss,js as dashboardJs} from './dashboard.mjs';
 
 function json(value,status=200) {
   return new Response(JSON.stringify(value),{status,headers:{
@@ -24,19 +25,41 @@ function idParam(url) {
 export default {
   async fetch(request,env) {
     const url = new URL(request.url);
-    if (url.pathname === '/health' && request.method === 'GET') return json({ok:true,service:'wa-price-watch',version:'0.1.0'});
+    if ((url.pathname === '/' || url.pathname === '/dashboard') && request.method==='GET')
+      return new Response(dashboardHtml,{headers:{
+        'Content-Type':'text/html; charset=utf-8',
+        'Cache-Control':'public, max-age=300',
+        'X-Content-Type-Options':'nosniff',
+        'Referrer-Policy':'no-referrer',
+        'X-Frame-Options':'DENY',
+        'Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src https: data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      }});
+    if(url.pathname==='/dashboard.css' && request.method==='GET')
+      return new Response(dashboardCss,{headers:{'Content-Type':'text/css; charset=utf-8','Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'}});
+    if(url.pathname==='/dashboard.js' && request.method==='GET')
+      return new Response(dashboardJs,{headers:{'Content-Type':'application/javascript; charset=utf-8','Cache-Control':'public, max-age=300','X-Content-Type-Options':'nosniff'}});
+    if (url.pathname === '/health' && request.method === 'GET') return json({ok:true,service:'wa-price-watch',version:'0.2.0'});
     if(url.pathname==='/api/v1/public' && request.method==='GET'){
       if(!env.DB) return json({error:'database_not_bound'},503);
       const indications=await getRows(env.DB,
-        'SELECT watch_id,source_id,merchant,title,url,price_cents,shipping_status,last_seen FROM indications ORDER BY price_cents ASC LIMIT 25');
+        'SELECT watch_id,source_id,merchant,title,url,image_url,price_cents,shipping_status,last_seen FROM indications ORDER BY price_cents ASC LIMIT 25');
+      const activeIndications=indications.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id));
       const source_health=await getRows(env.DB,
         'SELECT source_id,last_checked,last_ok,state,last_items FROM source_health ORDER BY source_id ASC LIMIT 30');
       const active_source_health=source_health.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id));
+      const history=await getRows(env.DB,
+        'SELECT i.source_id,obs.price_cents,obs.observed_at FROM indication_observations obs JOIN indications i ON obs.indication_key=i.key ORDER BY obs.observed_at DESC LIMIT 180');
+      const leads=await getRows(env.DB,
+        'SELECT title,url,first_seen FROM leads ORDER BY first_seen DESC LIMIT 10');
+      const confirmed=await getRows(env.DB,
+        'SELECT merchant,title,url,total_cents,last_seen FROM offers ORDER BY total_cents ASC LIMIT 12');
       const runs=await getRows(env.DB,
         'SELECT completed_at,source_ok,source_failed FROM runs ORDER BY id DESC LIMIT 1');
       return json({product:'iPhone 17 Pro Max 256 Go neuf',threshold_eur:Number(env.WATCH_MAX_EUR||1100),
         currency:'EUR',shipping_notice:'Prix affichés hors livraison, panier à vérifier',
-        indications,source_health:active_source_health,latest_run:runs[0]||null});
+        indications:activeIndications,source_health:active_source_health,
+        history:history.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id)),
+        leads,confirmed,latest_run:runs[0]||null});
     }
     if (!authorized(request,env)) return json({error:'unauthorized'},401);
     if (!env.DB) return json({error:'database_not_bound'},503);

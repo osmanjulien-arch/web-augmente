@@ -60,10 +60,11 @@ export async function saveIndication(db, offer, watch, sourceId, now) {
   const cents=Math.round(offer.price_eur*100);
   const prev=await db.prepare('SELECT price_cents FROM indications WHERE key=?').bind(key).first();
   await db.prepare(`INSERT INTO indications
-    (key,watch_id,source_id,merchant,title,url,price_cents,shipping_status,first_seen,last_seen)
-    VALUES (?,?,?,?,?,?,?,'unknown',?,?)
-    ON CONFLICT(key) DO UPDATE SET title=excluded.title,price_cents=excluded.price_cents,last_seen=excluded.last_seen`)
-    .bind(key,watch.id,sourceId,offer.merchant,offer.title,offer.url,cents,now,now).run();
+    (key,watch_id,source_id,merchant,title,url,price_cents,image_url,shipping_status,first_seen,last_seen)
+    VALUES (?,?,?,?,?,?,?,?,'unknown',?,?)
+    ON CONFLICT(key) DO UPDATE SET title=excluded.title,price_cents=excluded.price_cents,
+    image_url=COALESCE(excluded.image_url,indications.image_url),last_seen=excluded.last_seen`)
+    .bind(key,watch.id,sourceId,offer.merchant,offer.title,offer.url,cents,offer.image_url||null,now,now).run();
   if(!prev || prev.price_cents!==cents) await db.prepare(
     'INSERT INTO indication_observations (indication_key,watch_id,price_cents,observed_at) VALUES (?,?,?,?)'
   ).bind(key,watch.id,cents,now).run();

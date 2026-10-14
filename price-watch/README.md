@@ -103,3 +103,13 @@ Dupliquer une entrée de `watches` dans `src/config.mjs` en lui donnant un `id` 
 ## Traçabilité des sources
 
 Le point de consultation public /api/v1/public expose désormais source_health : date du dernier passage, dernière réussite et état ok/error. Une erreur de collecte ne signifie pas une hausse ou une baisse du prix. Aucune donnée de livraison ne doit être inventée.
+
+## Tableau mobile et notifications (v0.2, 2026-10-14)
+
+- Interface responsive : `GET /dashboard` ou `GET /`, avec fichiers statiques servis par le même Worker (`/dashboard.css`, `/dashboard.js`), sans dépendance externe.
+- Lecture seule : cartes prix marchand avec photos HTTPS si disponibles, classement, prix cible, comparaison visuelle, historique des *variations réelles*, signalements RSS et santé des sources. Aucun faux historique généré.
+- `GET /api/v1/public` : ajoute `image_url`, `history`, `leads`, `confirmed`. Masque les sources désactivées ; état et horodatage présents.
+- Photos provenant des métadonnées Product JSON-LD des marchands, avec liste stricte de domaines autorisés, migration `0004_product_image.sql`.
+- ntfy : ouverture du tableau au toucher via `X-Click`, actions explicites « Voir le tableau » et « Voir l'offre » ; la URL marchande reste affichée dans le message.
+- Les alertes gratuites idealo/Dealabs sont accessibles depuis le tableau pour élargir la surveillance. Leur activation se fait chez le fournisseur par l'utilisateur : **elles ne sont pas ingérées automatiquement** dans le Worker, faute d'API/autorisation ou connecteur d'emails paramétré.
+- Les pages et API de consultation sont publiques sans données personnelles. Le topic ntfy aléatoire est un secret ; ne pas le publier dans le dépôt. L'API d'écriture reste privée (et refuse toute ingestion tant que `API_TOKEN` n'a pas été paramétré).

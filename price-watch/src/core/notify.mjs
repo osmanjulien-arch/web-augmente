@@ -43,13 +43,19 @@ export async function telegramLeadNotify(env, lead, watch, fetchImpl=fetch) {
 }
 
 
+export const DASHBOARD_URL='https://wa-price-watch.osmanjulien-arch.workers.dev/dashboard';
+
 // Public ntfy topics: the random topic acts as a bearer capability. Never include personal data.
 export async function ntfyNotify(env,title,message,link,fetchImpl=fetch){
   if(!env.NTFY_TOPIC || !/^[a-zA-Z0-9_-]{20,64}$/.test(env.NTFY_TOPIC))return {sent:false,reason:'ntfy_not_configured'};
+  let safeOfferUrl;
+  try{const u=new URL(link);safeOfferUrl=u.protocol==='https:'&&!u.username&&!u.password?u.toString():null;}catch{}
+  const actions='view, Voir le tableau, '+DASHBOARD_URL+
+     (safeOfferUrl?'; view, Voir l offre, '+safeOfferUrl:'');
   const res=await fetchImpl('https://ntfy.sh/'+env.NTFY_TOPIC,{
     method:'POST', headers:{
       'Content-Type':'text/plain; charset=utf-8','X-Title':title.slice(0,150),
-      'X-Click':link,'X-Priority':'default'
+      'X-Click':DASHBOARD_URL,'X-Actions':actions,'X-Priority':'default'
     },body:message.slice(0,3500),signal:AbortSignal.timeout(10000)
   });
   if(!res.ok) throw new Error('ntfy HTTP '+res.status);

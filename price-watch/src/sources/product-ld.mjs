@@ -39,8 +39,17 @@ export function parseProductLd(html, source) {
           const seller=String(offer.seller?.name ||
             (merchantProof ? source.sellerFallback : '')).trim();
           if (!name || !seller) continue;
+          const rawImage=(Array.isArray(product.image)?product.image[0]:product.image);
+          let imageUrl=null;
+          try{
+            const imageRef=typeof rawImage==='string'?rawImage:rawImage?.url;
+            const u=new URL(imageRef);
+            if(u.protocol==='https:' && !u.username && !u.password &&
+              /(^|\.)(materiel\.net|rueducommerce\.fr|ldlc\.com|macway\.com|boulanger\.com)$/.test(u.hostname))
+              imageUrl=u.toString();
+          }catch{}
           out.push({title:name,merchant:seller,condition:'new',currency:'EUR',price_eur:price,
-            url:source.url,shipping_eur:null});
+            url:source.url,shipping_eur:null,image_url:imageUrl});
         }
       }
     }

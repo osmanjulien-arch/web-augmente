@@ -21,6 +21,7 @@ function fakeD1() {
   sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0002_indications.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0003_source_health.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0004_product_image.sql',import.meta.url),'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);
@@ -258,4 +259,54 @@ test('MacWay nested AggregateOffer retains only available new child offers',()=>
   assert.equal(o.length,1);
   assert.equal(o[0].price_eur,1479);
   assert.equal(o[0].merchant,'MacWay');
+});
+
+
+test('dashboard routes serve illustrated mobile UI with safe read-only endpoint',async()=>{
+  const env={DB:fakeD1()};
+  const homepage=await worker.fetch(new Request('https://example.org/dashboard'),env);
+  assert.equal(homepage.status,200);
+  const html=await homepage.text();
+  assert.match(html,/iPhone/);
+  assert.match(html,/dashboard.css/);
+  assert.match(homepage.headers.get('content-security-policy'),/default-src 'none'/);
+  assert.equal((await worker.fetch(new Request('https://example.org/dashboard.css'),env)).status,200);
+  const script=await worker.fetch(new Request('https://example.org/dashboard.js'),env);
+  assert.equal(script.status,200);
+  assert.match(await script.text(),/source_health/);
+});
+
+test('product photo is accepted only from HTTPS known merchant image hosts',()=>{
+  const src={url:'https://www.ldlc.com/fiche/test.html'};
+  const page=(image)=>'<script type="application/ld+json">'+JSON.stringify({
+    '@type':'Product',name:'Apple iPhone 17 Pro Max 256 Go Argent',image,
+    offers:{price:1379,priceCurrency:'EUR',itemCondition:'https://schema.org/NewCondition',
+      availability:'https://schema.org/InStock',seller:{name:'LDLC'}}
+  })+'</script>';
+  assert.equal(parseProductLd(page('https://media.ldlc.com/image/iphone.webp'),src)[0].image_url,
+    'https://media.ldlc.com/image/iphone.webp');
+  assert.equal(parseProductLd(page('https://evil.example/hijack.png'),src)[0].image_url,null);
+  assert.equal(parseProductLd(page('javascript:alert(1)'),src)[0].image_url,null);
+});
+
+test('ntfy push opens dashboard and includes an explicit retailer action',async()=>{
+  let headers;
+  const env={NTFY_TOPIC:'pw_ip17_12345678901234567890123456789012'};
+  const fake=async(_url,opts)=>{headers=opts.headers;return new Response('{}',{status:200});};
+  const {ntfyNotify,DASHBOARD_URL}=await import('../src/core/notify.mjs');
+  await ntfyNotify(env,'test','test push','https://www.ldlc.com/fiche/example.html',fake);
+  assert.equal(headers['X-Click'],DASHBOARD_URL);
+  assert.match(headers['X-Actions'],/Voir le tableau/);
+  assert.match(headers['X-Actions'],/Voir l offre/);
+});
+
+test('dashboard API includes history, RSS leads and only active retailer rows',async()=>{
+ const env={DB:fakeD1()};
+ const api=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
+ assert.equal(api.status,200);
+ const data=await api.json();
+ assert.ok(Array.isArray(data.history));
+ assert.ok(Array.isArray(data.leads));
+ assert.ok(Array.isArray(data.confirmed));
+ assert.equal(data.indications.length,0);
 });
