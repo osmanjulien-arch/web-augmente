@@ -123,3 +123,12 @@ Le point de consultation public /api/v1/public expose désormais source_health :
 - Le tableau affiche les **sources des signalements**, les comparateurs idealo / LeDénicheur et les alertes gratuites Google Alertes / Dealabs comme compléments manuels (non synchronisés dans D1).
 - Sources interdites/inaccessibles : Fnac/Darty HTTP 403, Boulanger HTTP 400 depuis Cloudflare, Amazon/Cdiscount sans flux prix autorisé. Aucun contournement. Un agrégateur complet de prix de marché ne peut pas être garanti gratuitement à partir de ces seules sources.
 - Si un fournisseur propose ultérieurement un flux RSS gratuit et autorisé avec URL directe, ajouter sa configuration après vérification de la licence et de la qualité, sans modifier le moteur.
+
+## Catalogue multi-familles — 14/10/2026
+
+- iPhone Pro Max **16, 17, 18**, profils générés pour les capacités 128, 256, 512 Go, 1 To et 2 To. Certaines combinaisons peuvent ne pas exister commercialement ; aucun faux résultat n'est créé pour elles.
+- Mac mini / Mac Studio Apple Silicon, mémoire unifiée **>=32 Go** pour entrer dans la veille des LLM quantifiés Q4. Les catégories mémoire estimées sont 30B (32 Go+), 70B (64 Go+), 120B (128 Go+) et 200B (256 Go+). **La classification n'est PAS une mesure de débit ou de qualité réelle des modèles** et dépend de la quantification, de la fenêtre de contexte, du cache KV, du runtime et de la mémoire laissée au système.
+- Alertes : seul le **17 Pro Max 256 Go** garde le seuil initial 1 100 € (à titre indicatif). Sur toutes les autres variantes, la première observation sert de référence ; notification en cas de baisse d'au moins **5 % et 100 €**. Aucun seuil d'achat non demandé n'a été inventé.
+- Fiches commerciales nouvelles via LDLC : 16 Pro Max 256/512 (neuf absent sur les offres captées), 17 Pro Max 1 To (en rupture), 18 Pro Max 256/512/2 To, Mac mini 32/48/64 Go, Mac Studio M5 Max 36 Go, M4 Max 64/128 Go, M3 Ultra 512 Go et M2 Ultra 128 Go. Les sources marquées allowUnavailable=true renvoient zéro offre lorsqu'il n'y a pas de produit neuf immédiatement disponible ; pas de faux état « en stock ».
+- Le tableau comprend des filtres de familles/générations/capacités/taille du modèle Q4 ; les prix disponibles de Mac **ne garantissent pas que tous les modèles 30 à 200B soient vendus à l'instant**. Les prix publiés restent hors frais de livraison inconnus.
+- Intégration indépendante, pas de fusion avec le projet Safari.

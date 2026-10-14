@@ -1,5 +1,5 @@
 import {activeWatches,sources} from '../config.mjs';
-import {watchFor,normalizeOffer,qualifies} from './match.mjs';
+import {watchFor,normalizeOffer,qualifies,meaningfulDrop} from './match.mjs';
 import {saveLead,saveOffer,lastAlertPrice,markAlert,saveRun,saveIndication,previousIndicationAlert,markIndicationAlert,saveSourceHealth} from './storage.mjs';
 import {telegramNotify,telegramLeadNotify,indicationNotify} from './notify.mjs';
 import {collect} from '../sources/registry.mjs';
@@ -80,8 +80,9 @@ export async function runScheduled(env, fetchImpl=fetch) {
           const stored=await saveIndication(env.DB,item,watch,source.id,now);
           result.indicationsSeen++;
           const prev=await previousIndicationAlert(env.DB,stored.key);
-          if(stored.priceCents <= watch.maxCents &&
-             (prev===null || stored.priceCents <= prev-100) && result.alertsSent<5) {
+          const underTarget=watch.maxCents>0 && stored.priceCents<=watch.maxCents;
+          const largeDrop=!watch.maxCents && meaningfulDrop(stored.previousPriceCents,stored.priceCents);
+          if((underTarget || largeDrop) && (prev===null || stored.priceCents<=prev-100) && result.alertsSent<5) {
             const sent=await indicationNotify(env,item,watch);
             if(sent.sent) {await markIndicationAlert(env.DB,stored.key,stored.priceCents,now);result.alertsSent++;}
             else result.notificationsPending++;

@@ -22,6 +22,7 @@ function fakeD1() {
   sqlite.exec(readFileSync(new URL('../migrations/0002_indications.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0003_source_health.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0004_product_image.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0005_catalog.sql',import.meta.url),'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);
@@ -159,13 +160,15 @@ test('merchant indicative prices persist without fabricating delivered price',as
     '<script type="application/ld+json">'+product+'</script>',{status:200});
   await runScheduled(env,feed);
   const indications=(await env.DB.prepare('SELECT * FROM indications').bind().all()).results;
-  assert.equal(indications.length,4);
+  const {sources}=await import('../src/config.mjs');
+  const productSources=sources.filter(x=>x.enabled && x.type==='product-ld');
+  assert.equal(indications.length,productSources.length);
   assert.equal(indications[0].shipping_status,'unknown');
   const confirmed=(await env.DB.prepare('SELECT * FROM offers').bind().all()).results;
   assert.equal(confirmed.length,0);
   const view=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
   assert.equal(view.status,200);
-  assert.equal((await view.json()).indications.length,4);
+  assert.equal((await view.json()).indications.length,productSources.length);
 });
 
 import {telegramNotify,telegramLeadNotify,indicationNotify} from '../src/core/notify.mjs';
@@ -235,11 +238,12 @@ test('public endpoint exposes per-source freshness and failures',async()=>{
   return new Response(JSON.stringify({error:'blocked'}),{status:403});
  };
  const result=await runScheduled(env,mock);
- assert.equal(result.sourceFailed,6);
+ const {sources}=await import('../src/config.mjs');
+ assert.equal(result.sourceFailed,sources.filter(x=>x.enabled && !x.url.includes('dealabs.com')).length);
  const response=await worker.fetch(new Request('https://example.org/api/v1/public'),env);
  const json=await response.json();
- assert.equal(json.source_health.length,8);
- assert.equal(json.source_health.filter(x=>x.state==='error').length,6);
+ assert.equal(json.source_health.length,sources.filter(x=>x.enabled).length);
+ assert.equal(json.source_health.filter(x=>x.state==='error').length,result.sourceFailed);
 });
 
 
@@ -334,4 +338,41 @@ test('recent lead notification filtering rejects outdated news and non-deal Goog
  assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max fiche technique',publishedAt:recent},source,now),false);
  assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max promotion',publishedAt:old},source,now),false);
  assert.equal(eligibleRecentLead({title:'iPhone 17 Pro Max promotion',publishedAt:null},source,now),false);
+});
+
+test('catalog watches all iPhone 16–18 Pro Max generations and all capacity classes',()=>{
+ const ws=activeWatches({});
+ for(const generation of [16,17,18]){
+   for(const cap of [128,256,512,1024,2048]){
+     assert.ok(ws.some(w=>w.id==='iphone-'+generation+'-pro-max-'+cap));
+     assert.equal(watchFor({title:'iPhone '+generation+' Pro Max '+(cap>=1024?cap/1024+' To':cap+' Go'),condition:'new'},ws)?.id,
+       'iphone-'+generation+'-pro-max-'+cap);
+   }
+ }
+ assert.equal(watchFor({title:'iPhone 15 Pro Max 256 Go',condition:'new'},ws),null);
+ assert.equal(watchFor({title:'iPhone 18 Pro Max 512 Go Reconditionné',condition:'refurbished'},ws),null);
+});
+test('Mac mini/studio require an Apple Silicon chip and explicit unified RAM; Q4 tiers are conservative',async()=>{
+ const {macMemoryGb,macLlmTier,macChip,meaningfulDrop}=await import('../src/core/match.mjs');
+ const ws=activeWatches({});
+ const p=t=>({title:t,condition:'new'});
+ assert.equal(macMemoryGb(p('Mac Studio M3 Ultra 256Go/4To')),256);
+ assert.equal(macMemoryGb(p('Mac mini M5 Pro 64GB/1TB')),64);
+ assert.equal(macMemoryGb(p('Mac Studio M5 Max 36 Go/512 Go')),36);
+ assert.equal(macChip(p('Mac Studio M3 Ultra 256 Go')),'M3 Ultra');
+ for(const [ram,tier] of [[24,null],[32,30],[48,30],[64,70],[128,120],[192,120],[256,200],[512,200]])
+   assert.equal(macLlmTier(ram),tier);
+ assert.equal(watchFor(p('Mac Studio M3 Ultra 256 Go/4 To'),ws)?.id,'mac-studio-llm');
+ assert.equal(watchFor(p('Mac Mini M5 Pro 64 Go/1 To'),ws)?.id,'mac-mini-llm');
+ assert.equal(watchFor(p('Mac mini Intel 64 Go'),ws),null);
+ assert.equal(watchFor(p('Mac mini M4 Pro 24 Go'),ws),null);
+ assert.equal(meaningfulDrop(null,400000),false);
+ assert.equal(meaningfulDrop(400000,390000),false);
+ assert.equal(meaningfulDrop(400000,375000),true);
+});
+test('unavailable product is a valid zero-offer scan, not a fake in-stock listing',()=>{
+ const body='<script type="application/ld+json">'+JSON.stringify({'@type':'Product',
+ name:'Apple iPhone 18 Pro Max 256 Go',offers:{price:1559,priceCurrency:'EUR',
+ availability:'https://schema.org/BackOrder',itemCondition:'https://schema.org/NewCondition',seller:{name:'LDLC'}}})+'</script>';
+ assert.deepEqual(parseProductLd(body,{url:'https://www.ldlc.com/fiche/abc',allowUnavailable:true}),[]);
 });

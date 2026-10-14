@@ -64,6 +64,6 @@ export async function ntfyNotify(env,title,message,link,fetchImpl=fetch){
 export async function indicationNotify(env,item,watch,fetchImpl=fetch){
   const price=Number(item.price_eur).toFixed(2);
   const message='Prix marchand affiché : '+price+' € (livraison NON vérifiée)\n'+
-    'Vendeur : '+item.merchant+'\n'+item.title+'\nConfirmer le prix livré au panier avant achat.\n'+item.url;
-  return ntfyNotify(env,'Piste prix iPhone 17 Pro Max',message,item.url,fetchImpl);
+    'Vendeur : '+item.merchant+'\n'+item.title+'\nConfirmer le prix livré et les caractéristiques (RAM/SSD pour Mac) avant achat.\n'+item.url;
+  return ntfyNotify(env,'Baisse de prix : '+watch.label,message,item.url,fetchImpl);
 }

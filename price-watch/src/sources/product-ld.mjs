@@ -54,6 +54,7 @@ export function parseProductLd(html, source) {
       }
     }
   }
+  if(!out.length && source.allowUnavailable && productCount>0)return [];
   if(!out.length) throw new Error(`no eligible new in-stock JSON-LD offer (product=${productCount},new=${newCount},stock=${stockCount},seller_proof=${merchantProof})`);
   return out;
 }

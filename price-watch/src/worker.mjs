@@ -42,11 +42,17 @@ export default {
     if(url.pathname==='/api/v1/public' && request.method==='GET'){
       if(!env.DB) return json({error:'database_not_bound'},503);
       const indications=await getRows(env.DB,
-        'SELECT watch_id,source_id,merchant,title,url,image_url,price_cents,shipping_status,last_seen FROM indications ORDER BY price_cents ASC LIMIT 25');
+        'SELECT watch_id,source_id,merchant,title,url,image_url,price_cents,shipping_status,last_seen,family,generation,capacity_gb,memory_gb,chip,llm_tier FROM indications ORDER BY price_cents ASC LIMIT 300');
+      // Disable stale / out-of-stock offers: the last source scan must contain an eligible offer.
       const activeIndications=indications.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id));
       const source_health=await getRows(env.DB,
         'SELECT source_id,last_checked,last_ok,state,last_items FROM source_health ORDER BY source_id ASC LIMIT 30');
       const active_source_health=source_health.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id));
+      const freshIndications=activeIndications.filter(s=>{
+        const health=active_source_health.find(h=>h.source_id===s.source_id);
+        return health?.state==='ok'&&health.last_items>0 &&
+          Date.parse(s.last_seen)>=Date.parse(health.last_checked)-60000;
+      });
       const history=await getRows(env.DB,
         'SELECT i.source_id,obs.price_cents,obs.observed_at FROM indication_observations obs JOIN indications i ON obs.indication_key=i.key ORDER BY obs.observed_at DESC LIMIT 180');
       const leads=await getRows(env.DB,
@@ -55,9 +61,10 @@ export default {
         'SELECT merchant,title,url,total_cents,last_seen FROM offers ORDER BY total_cents ASC LIMIT 12');
       const runs=await getRows(env.DB,
         'SELECT completed_at,source_ok,source_failed FROM runs ORDER BY id DESC LIMIT 1');
-      return json({product:'iPhone 17 Pro Max 256 Go neuf',threshold_eur:Number(env.WATCH_MAX_EUR||1100),
+      return json({product:'iPhone 16–18 Pro Max et Mac mini / Studio',threshold_eur:Number(env.WATCH_MAX_EUR||1100),
         currency:'EUR',shipping_notice:'Prix affichés hors livraison, panier à vérifier',
-        indications:activeIndications,source_health:active_source_health,
+        indications:freshIndications,watches:activeWatches(env).map(w=>({id:w.id,label:w.label,family:w.family,generation:w.generation||null,capacity_gb:w.capacityGb||null,min_memory_gb:w.minMemoryGb||null,threshold_eur:w.maxCents>0?w.maxCents/100:null})),
+        source_health:active_source_health,
         history:history.filter(s=>sources.some(c=>c.enabled && c.id===s.source_id)),
         leads,confirmed,latest_run:runs[0]||null});
     }

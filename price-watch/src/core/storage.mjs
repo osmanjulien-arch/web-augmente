@@ -1,3 +1,4 @@
+import {macMemoryGb,macChip,macLlmTier} from './match.mjs';
 export async function fingerprint(...parts) {
   const data = new TextEncoder().encode(parts.join('\u001f'));
   const hash = await crypto.subtle.digest('SHA-256', data);
@@ -59,16 +60,23 @@ export async function saveIndication(db, offer, watch, sourceId, now) {
   const key=await fingerprint('indication',sourceId,offer.merchant.toLowerCase(),offer.url);
   const cents=Math.round(offer.price_eur*100);
   const prev=await db.prepare('SELECT price_cents FROM indications WHERE key=?').bind(key).first();
+  const family=watch.family||'iphone';
+  const ramGb=family==='mac'?macMemoryGb(offer):null;
+  const tier=family==='mac'?macLlmTier(ramGb):null;
+  const chip=family==='mac'?macChip(offer):null;
   await db.prepare(`INSERT INTO indications
-    (key,watch_id,source_id,merchant,title,url,price_cents,image_url,shipping_status,first_seen,last_seen)
-    VALUES (?,?,?,?,?,?,?,?,'unknown',?,?)
-    ON CONFLICT(key) DO UPDATE SET title=excluded.title,price_cents=excluded.price_cents,
+    (key,watch_id,source_id,merchant,title,url,price_cents,image_url,shipping_status,first_seen,last_seen,family,generation,capacity_gb,memory_gb,chip,llm_tier)
+    VALUES (?,?,?,?,?,?,?,?,'unknown',?,?,?,?,?,?,?,?)
+    ON CONFLICT(key) DO UPDATE SET watch_id=excluded.watch_id,title=excluded.title,price_cents=excluded.price_cents,
+    family=excluded.family,generation=excluded.generation,capacity_gb=excluded.capacity_gb,
+    memory_gb=excluded.memory_gb,chip=excluded.chip,llm_tier=excluded.llm_tier,
     image_url=COALESCE(excluded.image_url,indications.image_url),last_seen=excluded.last_seen`)
-    .bind(key,watch.id,sourceId,offer.merchant,offer.title,offer.url,cents,offer.image_url||null,now,now).run();
+    .bind(key,watch.id,sourceId,offer.merchant,offer.title,offer.url,cents,offer.image_url||null,now,now,
+      family,watch.generation||null,watch.capacityGb||null,ramGb,chip,tier).run();
   if(!prev || prev.price_cents!==cents) await db.prepare(
     'INSERT INTO indication_observations (indication_key,watch_id,price_cents,observed_at) VALUES (?,?,?,?)'
   ).bind(key,watch.id,cents,now).run();
-  return {key,priceCents:cents,changed:!prev || prev.price_cents!==cents};
+  return {key,priceCents:cents,previousPriceCents:prev?.price_cents??null,changed:!prev || prev.price_cents!==cents};
 }
 export async function previousIndicationAlert(db,key){
   const row=await db.prepare('SELECT last_price_cents FROM indication_alerts WHERE indication_key=?').bind(key).first();
