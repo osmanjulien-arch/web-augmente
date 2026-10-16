@@ -122,13 +122,18 @@ forged props, consent, and actual OAuth PKCE flow for read and write. The
 supplemental Node >=22 SQLite script runs without child processes or network;
 it tests real SQLite statements but does not validate workerd or OAuth.
 
-## Provisioning after review — instructions only
+## Production status and original provisioning procedure — instructions only
 
-No resources have been provisioned and `wrangler.jsonc` is intentionally
-unchanged. Do not deploy until local validation and review succeed.
+Owner-approved production deployment completed on 2026-10-16. Dedicated EU-jurisdiction D1
+`web-augmente-context` is bound as `CONTEXT_DB` in `worker/wrangler.jsonc`;
+remote migration `0001_context_memory.sql` succeeded. Worker version `0.4.1`,
+commit `f5e376ea846b5527c2fc2ad47a366be62bd89ed6`, deployment ID
+`3722053b-0c5a-4fe8-9d17-637c643fd628`. Existing OAuth KV and page KV were retained.
+The following provisioning commands are retained for disaster recovery/reference;
+**do not re-create or replace the existing database during routine updates.**
 
-After owner approval, create a dedicated database (this command modifies the
-Cloudflare account):
+Initial provisioning (already completed; this command modifies the Cloudflare
+account and must not be repeated against the existing named database):
 
 ```powershell
 npx wrangler d1 create web-augmente-context
@@ -155,25 +160,39 @@ npm test
 npm run check
 ```
 
-Only after a separate production review, apply the additive migration remotely
-(`npx wrangler d1 migrations apply CONTEXT_DB --remote`) and deploy with the
-usual approved process. Then verify existing read tokens, new explicit write
-consent, save/get/stale conflict, `/api/wa`, and France Travail in production.
-Local tests do not prove real account binding IDs, migration installation,
-ChatGPT scope requests, OAuth reconnection, or remote D1 performance.
+Initial rollout completed with `npx wrangler d1 migrations apply CONTEXT_DB --remote`
+and `wrangler deploy --keep-vars`; new changes should follow the same review,
+test and rollback process. Existing read tools and D1 save/get are verified.
+New-connection OAuth consent and performance across different clients remain
+to be proven; local tests cannot substitute for this integration check.
 
 ## Validation in this implementation session
 
-- `npm test`: **53 passed**, two test files, real workerd/Miniflare D1 and the official OAuth provider. The suite also passed with the optional native config loader. No external resources or real secrets were required.
+- `npm test`: **55 passed**, two test files, real workerd/Miniflare D1 and the official OAuth provider. The suite also passed with the optional native config loader. No external resources or real secrets were required.
 - `node scripts/check-context-memory-local.mjs`: **6 passed**, supplemental
   in-memory SQLite checks. Node prints its experimental SQLite warning.
 - Syntax checks for both changed source modules and both test files passed;
   `git diff --check` passed (Git also reports LF/CRLF normalization notices).
-- `npm run check`: **passed**, Wrangler dry-run built a 1,253 KiB Worker bundle (227 KiB gzip) without deployment. Production configuration still has only the two existing KV bindings; `CONTEXT_DB` is not provisioned or bound.
+- `npm run check`: **passed**, including the `CONTEXT_DB` D1 binding. Production deployment and health verification succeeded. Current commit is recorded above.
 - Root repository `npm run check` and `npm test` are not green: **44/46 tests passed**. The two failures concern a previously stale generated userscript bundle and a missing root `linkedom` installation, neither of which was modified for context memory. They remain separate from the passing Worker suite.
 
 The Cloudflare test runner warns that `WA_API_TOKEN` is absent from local
 environment configuration; the OAuth tests supply their own test-only secrets.
-No real secrets are needed for these tests. No remote provisioning, migration,
-deployment, commit, or push was performed. Production `wrangler.jsonc` and the
+No real secrets were needed for local tests. After owner approval, the D1
+resource, migration, deployment, and GitHub branch push were completed. The
 pre-existing untracked scripts/error log were left untouched.
+
+## Live integration verification (2026-10-16)
+
+- `memory_save` created `context-memory-mcp/architecture-decisions`, version 1, in D1.
+- `memory_get`, `memory_overview`, `memory_load` (compact and deep) retrieved it
+  successfully through an existing authorized ChatGPT OAuth connection.
+- A compact call was observed at about 462 ms once; this is not a latency benchmark.
+- A second OAuth connection attempt from iPhone displayed a generic ChatGPT
+  connection failure. The exact failure point has **not** been proven: existing
+  OAuth connection works; new/reconnected OAuth flow needs targeted diagnosis.
+- Per-tool OAuth security schemes are advertised at the standard `tools/list`
+  location by a compatibility adapter in commit `f5e376e`. Listing `memory_save`
+  does not itself grant `memory:write`; explicit consent and verified scope are
+  still required. New-connection end-to-end consent remains unverified.
+- No automatic new-chat retrieval or automatic history synchronization is claimed.
