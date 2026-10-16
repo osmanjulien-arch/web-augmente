@@ -140,7 +140,7 @@ function hiddenValue(html, name) {
 
 function authorizationCookies(response) {
   const raw = response.headers.get('Set-Cookie') || '';
-  const pairs = raw.match(/__Host-WA-OAUTH-(?:STATE|CSRF)=[^;]*/g) || [];
+  const pairs = raw.match(/__Host-WA-OAUTH-(?:STATE|CSRF)-[0-9a-f]{24}=[^;]*/g) || [];
   assert.equal(pairs.length, 2);
   return pairs.join('; ');
 }
@@ -469,6 +469,23 @@ test.each([
   assert.ok(tokens.access_token);
   assert.ok(tokens.refresh_token);
 
+  // A refresh token must remain usable with a dynamically registered ChatGPT-style client.
+  // This probes the invalid_grant failure mode independently from browser consent cookies.
+  const refreshResponse = await worker.fetch(new Request(`${origin}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: registeredClient.client_id,
+      refresh_token: tokens.refresh_token
+    }).toString()
+  }), testEnv, executionContext());
+  const refreshed = await refreshResponse.json();
+  assert.equal(refreshResponse.status, 200, JSON.stringify(refreshed));
+  assert.ok(refreshed.access_token);
+  assert.ok(refreshed.refresh_token);
+  assert.equal(refreshed.scope, requestedScope);
+
   const mcpResponse = await worker.fetch(new Request(`${origin}/mcp`, {
     method: 'POST',
     headers: {
@@ -562,6 +579,41 @@ test('authorization escapes client metadata and rejects a wrong personal secret'
   assert.doesNotMatch(body, /incorrect-personal-secret-value/);
 });
 
+test('simultaneous OAuth dialogs use isolated cookies and both complete', async () => {
+  for (const reverse of [false, true]) {
+    const { testEnv, completed } = oauthEnv();
+    const first = await beginTestAuthorization(testEnv);
+    const second = await beginTestAuthorization(testEnv);
+    assert.notEqual(first.stateToken, second.stateToken);
+    const firstCookieNames = first.cookies.split('; ').map((part) => part.split('=')[0]);
+    const secondCookieNames = second.cookies.split('; ').map((part) => part.split('=')[0]);
+    assert.equal(firstCookieNames.some((name) => secondCookieNames.includes(name)), false);
+    const sharedCookies = [first.cookies, second.cookies].join('; ');
+    const dialogs = reverse ? [second, first] : [first, second];
+    for (const dialog of dialogs) {
+      const response = await handleAuthorize(authorizationPost({ ...dialog, cookies: sharedCookies }, TOKEN), testEnv);
+      assert.equal(response.status, 302);
+      assert.equal(response.headers.getSetCookie().length, 2);
+    }
+    assert.equal(completed.length, 2);
+  }
+});
+
+test('an invalid OAuth attempt cannot consume a valid pending authorization', async () => {
+  const { testEnv, completed } = oauthEnv();
+  const start = await beginTestAuthorization(testEnv);
+  const wrongSecret = await handleAuthorize(authorizationPost(start, 'not-the-secret-with-many-characters'), testEnv);
+  assert.equal(wrongSecret.status, 401);
+  assert.ok(await testEnv.OAUTH_KV.get(`${OAUTH_STATE_PREFIX}${start.stateToken}`));
+  const wrongCookie = { ...start, cookies: start.cookies.replace(/(CSRF-[0-9a-f]{24}=)[^;]*/, '$1incorrect-csrf') };
+  const denied = await handleAuthorize(authorizationPost(wrongCookie, TOKEN), testEnv);
+  assert.equal(denied.status, 400);
+  assert.equal(denied.headers.get('X-WA-OAuth-Error'), 'CSRF_COOKIE_MISMATCH');
+  const approved = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
+  assert.equal(approved.status, 302);
+  assert.equal(completed.length, 1);
+});
+
 test('OAuth state expires after ten minutes and a consumed state cannot be reused', async () => {
   const expired = oauthEnv();
   const expiredStart = await beginTestAuthorization(expired.testEnv);
@@ -585,16 +637,18 @@ const diagnosticCases = [
   ['STATE_FIELD_MISSING', (_env, start) => { start.stateToken = ''; }],
   ['CSRF_FIELD_MISSING', (_env, start) => { start.csrfToken = ''; }],
   ['STATE_COOKIE_MISSING', (_env, start) => {
-    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-STATE=')).join('; ');
+    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-STATE-')).join('; ');
   }],
   ['CSRF_COOKIE_MISSING', (_env, start) => {
-    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-CSRF=')).join('; ');
+    start.cookies = start.cookies.split('; ').filter((cookie) => !cookie.startsWith('__Host-WA-OAUTH-CSRF-')).join('; ');
   }],
   ['STATE_COOKIE_MISMATCH', (_env, start) => {
-    start.cookies = start.cookies.replace(start.stateToken, 'different-session-cookie');
+    start.cookies = start.cookies.split('; ').map((pair) => pair.startsWith('__Host-WA-OAUTH-STATE-')
+      ? pair.replace(/=.*/, '=different-session-cookie') : pair).join('; ');
   }],
   ['CSRF_COOKIE_MISMATCH', (_env, start) => {
-    start.cookies = start.cookies.replace(start.csrfToken, 'different-csrf-cookie');
+    start.cookies = start.cookies.split('; ').map((pair) => pair.startsWith('__Host-WA-OAUTH-CSRF-')
+      ? pair.replace(/=.*/, '=different-csrf-cookie') : pair).join('; ');
   }],
   ['STATE_UNAVAILABLE', async (testEnv, start) => {
     await testEnv.OAUTH_KV.delete(`${OAUTH_STATE_PREFIX}${start.stateToken}`);
