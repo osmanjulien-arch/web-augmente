@@ -3,6 +3,7 @@ import OAuthProvider, { AuthorizationError } from '@cloudflare/workers-oauth-pro
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { registerContextMemoryTools, MEMORY_RESUME_INSTRUCTIONS } from './context-memory.js';
+import { EMPLOYMENT_CRON, runEmploymentCycle } from './employment-agent/runner.js';
 import {
   FranceTravailApiError,
   franceTravailEventsStatus,
@@ -1129,7 +1130,19 @@ const oauthProvider = new OAuthProvider({
   refreshTokenTTL: 30 * 24 * 60 * 60
 });
 
-export default oauthProvider;
+export default {
+  fetch(request, env, ctx) {
+    return oauthProvider.fetch(request, env, ctx);
+  },
+  scheduled(controller, env, ctx) {
+    if (controller.cron !== EMPLOYMENT_CRON) return;
+    ctx.waitUntil(
+      runEmploymentCycle(env)
+        .then(result => console.log('employment_agent_cycle', JSON.stringify(result.metrics)))
+        .catch(error => { console.error('employment_agent_failed', String(error?.code || error?.name || 'unknown')); throw error; })
+    );
+  }
+};
 export {
   OAUTH_SCOPE,
   OAUTH_WRITE_SCOPE,
