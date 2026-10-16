@@ -1050,7 +1050,7 @@ async function addToolSecuritySchemes(response) {
   const addSchemes = payload => {
     if (!Array.isArray(payload?.result?.tools)) return payload;
     for (const tool of payload.result.tools) {
-      if (!['memory_overview', 'memory_load', 'memory_get', 'memory_save'].includes(tool.name)) continue;
+      if (!['memory_search', 'memory_overview', 'memory_load', 'memory_get', 'memory_save'].includes(tool.name)) continue;
       tool.securitySchemes = [{ type: 'oauth2', scopes: tool.name === 'memory_save'
         ? [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] : [OAUTH_SCOPE] }];
       changed = true;

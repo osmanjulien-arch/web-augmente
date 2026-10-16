@@ -55,6 +55,30 @@ test('retrieval filters, depths, injection labeling and strict serialized budget
     expect(result.truncated).toBe(true);
   }
 });
+test('keyword search finds prior work without key, folds accents, and uses current versions only', async () => {
+  const store = new ContextMemory(env);
+  await store.save(note({ key: 'agents/minimax', project: 'agents', tags: ['architecture'],
+    summary: 'Audit AUTOMATION-LAB et agents IA', body: 'Mémoire Cloudflare D1, outils réutilisables.' }));
+  await store.save(note({ key: 'other/note', project: 'other', tags: ['misc'],
+    summary: 'Autre sujet', body: 'Un rapport sur les agents, mais sans architecture.' }));
+  const search = await store.search({ query: 'rappelle notre audit architecture IA et Cloudflare' });
+  expect(search.ok).toBe(true);
+  expect(search.items[0]).toMatchObject({ key: 'agents/minimax', project: 'agents', version: 1 });
+  expect(search.items[0].matched_terms).toContain('architecture');
+  expect(search.rank_score_is_not_confidence).toBe(true);
+  expect((await store.search({ query: 'memoire', project: 'agents' })).items[0].key).toBe('agents/minimax');
+  expect((await store.search({ query: 'cloudflare', project: 'other' })).items).toEqual([]);
+  expect((await store.search({ query: 'architecture', limit: 1 })).more_available).toBe(true);
+  expect((await store.search({ query: 'architecture', char_budget: 512 })).truncated).toBe(true);
+  expect(JSON.stringify(await store.search({ query: 'architecture', char_budget: 512 })).length).toBeLessThanOrEqual(512);
+  expect((await store.search({ query: 'le du et' })).error).toBe('invalid_query_terms');
+  expect((await store.search({ query: 'x'.repeat(201) })).error).toBe('invalid_input');
+  await store.save(note({ key: 'agents/minimax', project: 'agents', tags: ['archive'],
+    summary: 'Nouvelle version sans données anciennes', body: 'Règles actualisées', expected_version: 1 }));
+  expect((await store.search({ query: 'cloudflare' })).items).toEqual([]);
+  expect((await store.search({ query: 'actualisees' })).items[0].version).toBe(2);
+});
+
 test('rejects credentials in all fields and oversized or invalid notes without echoing', async () => {
   const store = new ContextMemory(env);
   for (const field of ['body', 'source', 'summary', 'project']) {
@@ -101,7 +125,11 @@ test('MCP authorized write saves to D1 and reads exact historical versions', asy
     expect(loadDescriptor.description).toContain('depth=recent for brief status');
     expect(loadDescriptor.description).toContain('depth=deep for substantial continuation');
     expect(listed.result.tools.find(tool => tool.name === 'memory_save').description).toContain('explicit user validation');
+    const searchTool = listed.result.tools.find(tool => tool.name === 'memory_search');
+    expect(searchTool.description).toContain('everyday words');
+    expect(searchTool.annotations.readOnlyHint).toBe(true);
     expect(await call('memory_save', note())).toMatchObject({ ok: true, version: 1 });
+    expect((await call('memory_search', { query: 'useful context' })).items[0].key).toBe('test/note');
     expect(await call('memory_save', note())).toMatchObject({ error: 'version_conflict' });
     const loaded = await call('memory_get', { key: 'test/note', version: 1 });
     expect(loaded.items[0].source).toBe(note().source);

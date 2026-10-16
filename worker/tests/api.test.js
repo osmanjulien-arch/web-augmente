@@ -858,6 +858,7 @@ test('MCP exposes the high-level France Travail tools and statistical references
       'memory_load',
       'memory_overview',
       'memory_save',
+      'memory_search',
       'wa_get_last_page'
     ]);
     for (const name of ['france_travail_jobs_search', 'france_travail_company_prospects', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis', 'france_travail_stats_reference']) {

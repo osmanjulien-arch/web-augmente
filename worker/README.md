@@ -26,6 +26,29 @@ L’intégration France Travail utilise OAuth 2.0 `client_credentials`. Les mêm
 
 Les nouveaux outils haut niveau utilisent des endpoints et scopes officiels vérifiés côté code. Le Worker impose HTTPS et l’hôte `api.francetravail.io`; seule La Bonne Boîte peut suivre la redirection documentée vers `labonneboite.francetravail.fr`, avec suppression du bearer avant le second appel. Il applique aussi un timeout, renouvelle une fois le jeton sur HTTP 401, et utilise un cache de réponses ainsi qu’un throttling **best effort par isolate Cloudflare**. Ce throttling réduit les appels inutiles mais ne constitue pas un limiteur global distribué.
 
+## Recherche des fiches mémoire par mots-clés
+
+Le MCP expose `memory_search` en lecture seule (scope OAuth `memory:read`) pour
+retrouver un chantier sans connaître son nom exact. Paramètres : `query` (texte
+libre, 2–200 caractères), `project` facultatif, `limit` (1–20, défaut 8) et
+`char_budget` (512–48 000). Les recherches ignorent la casse et les accents ;
+les résultats classés retournent la clé, la version courante, le résumé, les mots
+correspondants et un extrait, jamais l'historique entier. Le score est une
+heuristique lexicale, **pas** un indice de fiabilité ni de similarité sémantique.
+
+Utilisation : `memory_search({query: "audit PC agents cloudflare"})`, puis
+`memory_get` sur la clé sélectionnée ou `memory_load` avec son projet.
+Pour une liste générale, continuer d'utiliser `memory_overview`.
+
+Choix de prudence : la recherche parcourt au maximum 1 000 fiches courantes et
+signale `scan_limited` et `more_available` lorsque le jeu dépasse la fenêtre ;
+aucune modification de schéma ni de droits d'écriture n'a été nécessaire.
+Mesurer volume/latence/qualité avant d'envisager FTS5 ou une recherche
+sémantique. Les tables virtuelles FTS5 peuvent compliquer les exports D1 ;
+prévoir une stratégie de sauvegarde avant migration. Aucune vectorisation,
+index sémantique ou récupération automatique des historiques ChatGPT n'est
+mise en place à ce stade.
+
 ## Stockage
 
 Deux namespaces KV distincts sont obligatoires :
