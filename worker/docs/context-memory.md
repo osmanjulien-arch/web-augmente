@@ -39,7 +39,12 @@ reversible tombstone and deliberately define visibility of historical versions.
 
 `memory:read` remains required for `/mcp` and works with existing tokens.
 It registers `memory_overview`, `memory_load`, and `memory_get` alongside the
-existing tools. Read-only clients do not see or invoke `memory_save`.
+existing tools. The `memory_save` descriptor is visible to read-only clients,
+but an unprivileged call returns `insufficient_scope` and an MCP OAuth
+re-authorization challenge. Without a verified `memory:write` grant, the
+write callback never reaches D1. The installed SDK publishes per-tool OAuth
+requirements through the documented compatibility `_meta.securitySchemes`
+field (it does not yet forward top-level `securitySchemes`).
 
 For writes the client must explicitly request **both** `memory:read memory:write`
 and the owner must submit the consent form showing both permissions. Merely

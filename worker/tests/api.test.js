@@ -233,7 +233,9 @@ test('context tools are read-only by default and writes require verified scopes'
     const mcp = await createMcpRpc(env(), scopes);
     try {
       const listed = await mcp.rpc('tools/list');
-      assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), scopes?.includes(OAUTH_WRITE_SCOPE) || false);
+      const saveTool = listed.result.tools.find(t => t.name === 'memory_save');
+      assert.ok(saveTool, 'Write tool must be discoverable before OAuth scope upgrade');
+      assert.deepEqual(saveTool._meta.securitySchemes, [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
       for (const name of ['memory_overview', 'memory_load', 'memory_get']) {
         assert.ok(listed.result.tools.find(t => t.name === name));
       }
@@ -243,8 +245,13 @@ test('context tools are read-only by default and writes require verified scopes'
         key: 'a', project: 'p', summary: 's', body: 'b', source: 'user',
         source_created_at: '2026-10-16T10:00:00Z', expected_version: 0
       } });
-      if (scopes?.includes(OAUTH_WRITE_SCOPE)) assert.equal(JSON.parse(save.result.content[0].text).error, 'not_configured');
-      else assert.ok(save.error || save.result?.isError);
+      if (scopes?.includes(OAUTH_WRITE_SCOPE)) {
+        assert.equal(JSON.parse(save.result.content[0].text).error, 'not_configured');
+      } else {
+        assert.equal(save.result?.isError, true);
+        assert.equal(JSON.parse(save.result.content[0].text).error, 'insufficient_scope');
+        assert.match(save.result._meta['mcp/www_authenticate'][0], /memory:read memory:write/);
+      }
     } finally { await mcp.clientTransport.close(); await mcp.server.close(); }
   }
 });
@@ -260,7 +267,8 @@ test('client props cannot escalate verified read token; malformed scopes are den
   const text = await response.text();
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(response.status, 200);
-  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), false);
+  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
   for (const scope of [undefined, 'memory:read memory:write', [OAUTH_WRITE_SCOPE], ['not-memory:read']]) {
     testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({ scope });
     assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
@@ -490,7 +498,8 @@ test.each([
   const text = await toolsResponse.text();
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(toolsResponse.status, 200);
-  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), write);
+  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
 
 });
 
@@ -790,6 +799,7 @@ test('MCP exposes the high-level France Travail tools and statistical references
       'memory_get',
       'memory_load',
       'memory_overview',
+      'memory_save',
       'wa_get_last_page'
     ]);
     for (const name of ['france_travail_jobs_search', 'france_travail_company_prospects', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis', 'france_travail_stats_reference']) {
