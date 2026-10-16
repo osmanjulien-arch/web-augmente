@@ -90,8 +90,17 @@ test('MCP authorized write saves to D1 and reads exact historical versions', asy
     return JSON.parse(response.result.content[0].text);
   };
   try {
-    await rpc('initialize', { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 'memory-test', version: '1' } });
+    const initialized = await rpc('initialize', { protocolVersion: '2026-07-28', capabilities: {}, clientInfo: { name: 'memory-test', version: '1' } });
+    expect(initialized.result.instructions).toContain('Only retrieve it when the user asks to resume');
+    expect(initialized.result.instructions).toContain('Do not load on every turn');
+    expect(initialized.result.instructions).toContain('Save only with explicit user approval');
     await client.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    const listed = await rpc('tools/list', {});
+    const loadDescriptor = listed.result.tools.find(tool => tool.name === 'memory_load');
+    expect(loadDescriptor.description).toContain('depth=compact for index');
+    expect(loadDescriptor.description).toContain('depth=recent for brief status');
+    expect(loadDescriptor.description).toContain('depth=deep for substantial continuation');
+    expect(listed.result.tools.find(tool => tool.name === 'memory_save').description).toContain('explicit user validation');
     expect(await call('memory_save', note())).toMatchObject({ ok: true, version: 1 });
     expect(await call('memory_save', note())).toMatchObject({ error: 'version_conflict' });
     const loaded = await call('memory_get', { key: 'test/note', version: 1 });

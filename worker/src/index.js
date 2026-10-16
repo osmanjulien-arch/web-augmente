@@ -2,7 +2,7 @@
 import OAuthProvider, { AuthorizationError } from '@cloudflare/workers-oauth-provider';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
-import { registerContextMemoryTools } from './context-memory.js';
+import { registerContextMemoryTools, MEMORY_RESUME_INSTRUCTIONS } from './context-memory.js';
 import {
   FranceTravailApiError,
   franceTravailEventsStatus,
@@ -752,7 +752,7 @@ function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE]) {
   const server = new McpServer({
     name: 'web-augmente-v1',
     version: API_VERSION
-  });
+  }, { instructions: MEMORY_RESUME_INSTRUCTIONS });
   const pageSchema = z.object({
     id: z.string().nullable(),
     title: z.string().nullable(),
