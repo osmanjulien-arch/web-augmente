@@ -2,6 +2,7 @@
 import OAuthProvider, { AuthorizationError } from '@cloudflare/workers-oauth-provider';
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
+import { registerContextMemoryTools } from './context-memory.js';
 import {
   FranceTravailApiError,
   franceTravailEventsStatus,
@@ -24,6 +25,7 @@ const LAST_PAGE_KEY = 'meta:last_page';
 const OAUTH_STATE_PREFIX = 'wa:oauth:pending:';
 const OAUTH_STATE_TTL_SECONDS = 10 * 60;
 const OAUTH_SCOPE = 'memory:read';
+const OAUTH_WRITE_SCOPE = 'memory:write';
 const PUBLIC_ORIGIN = 'https://web-augmente-api.osmanjulien-arch.workers.dev';
 const MCP_RESOURCE = `${PUBLIC_ORIGIN}/mcp`;
 const CHATGPT_OAUTH_CALLBACK = 'https://chatgpt.com/connector_platform_oauth_redirect';
@@ -501,6 +503,7 @@ function responseWithCookies(body, { status = 200, headers = {}, cookies = [], o
 }
 
 function authorizePage({ client, oauthRequest, csrfToken, stateToken }) {
+  const writeRequested = oauthRequest.scope.includes(OAUTH_WRITE_SCOPE);
   const clientName = escapeHtml(client.clientName || 'Client MCP sans nom');
   const clientId = escapeHtml(client.clientId);
   const clientUri = client.clientUri
@@ -529,14 +532,15 @@ function authorizePage({ client, oauthRequest, csrfToken, stateToken }) {
     <p><strong>Client :</strong> ${clientName}</p>
     <p class="muted"><strong>Identifiant :</strong> ${clientId}</p>
     ${clientUri}
-    <p>Ce client demande uniquement un accès en lecture :</p>
-    <p class="scope"><strong>${escapeHtml(OAUTH_SCOPE)}</strong> — lire la dernière page mémorisée et interroger les données publiques France Travail configurées sur ce serveur.</p>
+    <p>Ce client demande les permissions suivantes :</p>
+    <p class="scope"><strong>${escapeHtml(OAUTH_SCOPE)}</strong> — lire le contexte sauvegardé, la dernière page mémorisée et les données publiques France Travail.</p>
+    ${writeRequested ? '<p class="scope"><strong>memory:write</strong> — enregistrer des notes et leurs nouvelles versions.</p>' : ''}
     <form method="post" action="/authorize" autocomplete="off">
       <input type="hidden" name="state_token" value="${escapeHtml(stateToken)}">
       <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
       <label for="personal_secret">Secret personnel</label>
       <input id="personal_secret" name="personal_secret" type="password" required minlength="20" autocomplete="current-password">
-      <button type="submit">Autoriser en lecture seule</button>
+      <button type="submit">${writeRequested ? 'Autoriser la lecture et l’écriture' : 'Autoriser en lecture seule'}</button>
     </form>
     <p class="muted">Le secret est envoyé uniquement dans ce formulaire HTTPS. Il n’est ni enregistré ni retourné.</p>
   </main>
@@ -582,17 +586,16 @@ function authorizationErrorResponse(error) {
 function invalidScopeResponse(oauthRequest) {
   const redirect = new URL(oauthRequest.redirectUri);
   redirect.searchParams.set('error', 'invalid_scope');
-  redirect.searchParams.set('error_description', `Le seul scope accepté est ${OAUTH_SCOPE}.`);
+  redirect.searchParams.set('error_description', `Scope requis : ${OAUTH_SCOPE}. Scope optionnel : ${OAUTH_WRITE_SCOPE}.`);
   if (oauthRequest.state) redirect.searchParams.set('state', oauthRequest.state);
   if (oauthRequest.issuer) redirect.searchParams.set('iss', oauthRequest.issuer);
   return Response.redirect(redirect.toString(), 302);
 }
 
-function hasOnlyReadScope(scopes) {
+function hasAllowedScopes(scopes) {
   return Array.isArray(scopes)
-    && scopes.length > 0
-    && [...new Set(scopes)].length === 1
-    && scopes[0] === OAUTH_SCOPE;
+    && scopes.includes(OAUTH_SCOPE)
+    && scopes.every(scope => scope === OAUTH_SCOPE || scope === OAUTH_WRITE_SCOPE);
 }
 
 async function beginAuthorization(request, env) {
@@ -602,7 +605,7 @@ async function beginAuthorization(request, env) {
   } catch (error) {
     return authorizationErrorResponse(error);
   }
-  if (!hasOnlyReadScope(oauthRequest.scope)) return invalidScopeResponse(oauthRequest);
+  if (!hasAllowedScopes(oauthRequest.scope)) return invalidScopeResponse(oauthRequest);
 
   let client;
   try {
@@ -695,7 +698,7 @@ async function completePersonalAuthorization(request, env) {
     else code = 'CSRF_STATE_MISMATCH';
     return oauthDiagnosticError(code);
   }
-  if (!hasOnlyReadScope(pending.oauthRequest.scope)) {
+  if (!hasAllowedScopes(pending.oauthRequest.scope)) {
     return responseWithCookies(authMessagePage('Autorisation refusée', 'Scope OAuth non autorisé.'), {
       status: 400,
       cookies: clearAuthCookies()
@@ -720,8 +723,8 @@ async function completePersonalAuthorization(request, env) {
       request: pending.oauthRequest,
       userId: 'wa-personal-user',
       metadata: { clientName: pending.clientName },
-      scope: [OAUTH_SCOPE],
-      props: { userId: 'wa-personal-user', scope: [OAUTH_SCOPE] }
+      scope: [...new Set(pending.oauthRequest.scope)],
+      props: { userId: 'wa-personal-user', scope: [...new Set(pending.oauthRequest.scope)] }
     }));
   } catch {
     return responseWithCookies(authMessagePage('Autorisation impossible', 'Le code OAuth n’a pas pu être créé.'), {
@@ -745,7 +748,7 @@ async function handleAuthorize(request, env) {
   return responseWithCookies(authMessagePage('Méthode refusée', 'Utilise GET ou POST.'), { status: 405 });
 }
 
-function createWebAugmenteMcpServer(env) {
+function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE]) {
   const server = new McpServer({
     name: 'web-augmente-v1',
     version: API_VERSION
@@ -762,6 +765,7 @@ function createWebAugmenteMcpServer(env) {
     content: z.string().nullable(),
     content_hash: z.string().nullable()
   });
+  registerContextMemoryTools(server, env, verifiedScopes);
   server.registerTool('france_travail_events_status', {
     title: 'Vérifier la connexion France Travail',
     description: 'Vérifie sans exposer aucun secret si l’API officielle Mes Evènements Emploi de France Travail est configurée côté Worker.',
@@ -1032,8 +1036,10 @@ const mcpApiHandler = {
   async fetch(request, env, ctx) {
     const authorization = request.headers.get('Authorization') || '';
     const bearer = authorization.startsWith('Bearer ') ? authorization.slice(7).trim() : '';
-    const token = bearer ? await env.OAUTH_PROVIDER.unwrapToken(bearer) : null;
-    if (!token?.scope?.includes(OAUTH_SCOPE)) {
+    let token;
+    try { token = bearer ? await env.OAUTH_PROVIDER.unwrapToken(bearer) : null; }
+    catch { token = null; }
+    if (!Array.isArray(token?.scope) || !token.scope.includes(OAUTH_SCOPE)) {
       return Response.json({ error: 'insufficient_scope' }, {
         status: 403,
         headers: {
@@ -1043,10 +1049,11 @@ const mcpApiHandler = {
       });
     }
 
-    const handler = createMcpHandler(() => createWebAugmenteMcpServer(env), {
+    const verifiedScopes = [...token.scope];
+    const handler = createMcpHandler(() => createWebAugmenteMcpServer(env, verifiedScopes), {
       route: '/mcp',
       corsOptions: false,
-      authContext: { props: ctx?.props || {} }
+      authContext: { props: { scope: verifiedScopes } }
     });
     return handler(request, env, ctx);
   }
@@ -1067,11 +1074,11 @@ const oauthProvider = new OAuthProvider({
   authorizeEndpoint: '/authorize',
   tokenEndpoint: '/oauth/token',
   clientRegistrationEndpoint: '/oauth/register',
-  scopesSupported: [OAUTH_SCOPE],
+  scopesSupported: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE],
   resourceMetadata: {
     resource: MCP_RESOURCE,
     authorization_servers: [PUBLIC_ORIGIN],
-    scopes_supported: [OAUTH_SCOPE],
+    scopes_supported: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE],
     bearer_methods_supported: ['header'],
     resource_name: 'Web Augmenté V1'
   },
@@ -1084,6 +1091,8 @@ const oauthProvider = new OAuthProvider({
 export default oauthProvider;
 export {
   OAUTH_SCOPE,
+  OAUTH_WRITE_SCOPE,
+  mcpApiHandler,
   OAUTH_STATE_PREFIX,
   OAUTH_STATE_TTL_SECONDS,
   UNTRUSTED_CONTENT_WARNING,
