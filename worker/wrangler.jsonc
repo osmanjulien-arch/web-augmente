@@ -15,6 +15,14 @@
       "id": "4c0896a44fdf4306b3afb4ef771ecfa0"
     }
   ],
+  "d1_databases": [
+    {
+      "binding": "CONTEXT_DB",
+      "database_name": "web-augmente-context",
+      "database_id": "d92e02c2-8370-4428-942a-562484e011ea",
+      "migrations_dir": "migrations"
+    }
+  ],
   "secrets": {
     "required": ["WA_API_TOKEN"]
   },
