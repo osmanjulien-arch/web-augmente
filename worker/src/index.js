@@ -29,8 +29,13 @@ const OAUTH_WRITE_SCOPE = 'memory:write';
 const PUBLIC_ORIGIN = 'https://web-augmente-api.osmanjulien-arch.workers.dev';
 const MCP_RESOURCE = `${PUBLIC_ORIGIN}/mcp`;
 const CHATGPT_OAUTH_CALLBACK = 'https://chatgpt.com/connector_platform_oauth_redirect';
+// Unique cookie names isolate simultaneous OAuth dialogs in the same browser.
+// Never reuse a shared state/CSRF cookie name across authorizations.
 const OAUTH_STATE_COOKIE = '__Host-WA-OAUTH-STATE';
 const OAUTH_CSRF_COOKIE = '__Host-WA-OAUTH-CSRF';
+function sessionCookieName(prefix, stateToken) {
+  return `${prefix}-${stateToken.slice(0, 24)}`;
+}
 const OAUTH_DIAGNOSTIC_MESSAGES = Object.freeze({
   FORM_INVALID: 'Le formulaire reçu est invalide.',
   STATE_FIELD_MISSING: 'Le champ de session du formulaire est absent.',
@@ -470,10 +475,11 @@ function authCookie(name, value, maxAge = OAUTH_STATE_TTL_SECONDS) {
   return `${name}=${value}; Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
 
-function clearAuthCookies() {
+function clearAuthCookies(stateToken) {
+  if (!/^[0-9a-f]{64}$/.test(stateToken)) return [];
   return [
-    authCookie(OAUTH_STATE_COOKIE, '', 0),
-    authCookie(OAUTH_CSRF_COOKIE, '', 0)
+    authCookie(sessionCookieName(OAUTH_STATE_COOKIE, stateToken), '', 0),
+    authCookie(sessionCookieName(OAUTH_CSRF_COOKIE, stateToken), '', 0)
   ];
 }
 
@@ -552,7 +558,7 @@ function authMessagePage(title, message) {
   return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title></head><body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(message)}</p></main></body></html>`;
 }
 
-function oauthDiagnosticError(code, status = 400) {
+function oauthDiagnosticError(code, status = 400, stateToken = '') {
   // Only fixed codes and an independent random ID are logged. Never include
   // request headers, URLs, form values, cookies, state hashes or KV records.
   const requestId = crypto.randomUUID();
@@ -566,7 +572,7 @@ function oauthDiagnosticError(code, status = 400) {
   return responseWithCookies(authMessagePage('Autorisation refusée', message), {
     status,
     headers: { 'X-WA-OAuth-Error': code, 'X-WA-Request-Id': requestId },
-    cookies: clearAuthCookies()
+    cookies: clearAuthCookies(stateToken)
   });
 }
 
@@ -632,8 +638,8 @@ async function beginAuthorization(request, env) {
   return responseWithCookies(authorizePage({ client, oauthRequest, csrfToken, stateToken }), {
     oauthRedirectUri: oauthRequest.redirectUri,
     cookies: [
-      authCookie(OAUTH_STATE_COOKIE, stateToken),
-      authCookie(OAUTH_CSRF_COOKIE, csrfToken)
+      authCookie(sessionCookieName(OAUTH_STATE_COOKIE, stateToken), stateToken),
+      authCookie(sessionCookieName(OAUTH_CSRF_COOKIE, stateToken), csrfToken)
     ]
   });
 }
@@ -657,19 +663,11 @@ async function completePersonalAuthorization(request, env) {
       ? await env.OAUTH_KV.get(pendingKey, { type: 'json' })
       : null;
   } catch {
-    return oauthDiagnosticError('STORAGE_READ_FAILED', 503);
+    return oauthDiagnosticError('STORAGE_READ_FAILED', 503, stateToken);
   }
 
-  // Preserve the existing state-consumption behavior: this patch diagnoses
-  // failures without changing the authentication policy or storage schema.
-  try {
-    if (pending) await env.OAUTH_KV.delete(pendingKey);
-  } catch {
-    return oauthDiagnosticError('STORAGE_DELETE_FAILED', 503);
-  }
-
-  const stateCookie = cookieValue(request, OAUTH_STATE_COOKIE);
-  const csrfCookie = cookieValue(request, OAUTH_CSRF_COOKIE);
+  const stateCookie = cookieValue(request, sessionCookieName(OAUTH_STATE_COOKIE, stateToken));
+  const csrfCookie = cookieValue(request, sessionCookieName(OAUTH_CSRF_COOKIE, stateToken));
   const csrfHash = csrfToken ? await sha256Hex(csrfToken) : '';
   const [stateMatches, csrfMatches, storedCsrfMatches] = await Promise.all([
     tokensMatch(stateToken, stateCookie),
@@ -696,25 +694,33 @@ async function completePersonalAuthorization(request, env) {
     else if (!pending.oauthRequest || !Number.isFinite(pending.expiresAt)) code = 'STATE_INVALID';
     else if (pending.expiresAt < now) code = 'STATE_EXPIRED';
     else code = 'CSRF_STATE_MISMATCH';
-    return oauthDiagnosticError(code);
+    return oauthDiagnosticError(code, 400, stateToken);
   }
   if (!hasAllowedScopes(pending.oauthRequest.scope)) {
     return responseWithCookies(authMessagePage('Autorisation refusée', 'Scope OAuth non autorisé.'), {
       status: 400,
-      cookies: clearAuthCookies()
+      cookies: clearAuthCookies(stateToken)
     });
   }
   if (!env.WA_API_TOKEN || env.WA_API_TOKEN.length < 20) {
     return responseWithCookies(authMessagePage('Autorisation indisponible', 'Le serveur n’est pas configuré.'), {
       status: 503,
-      cookies: clearAuthCookies()
+      cookies: clearAuthCookies(stateToken)
     });
   }
   if (!personalSecret || !(await tokensMatch(personalSecret, env.WA_API_TOKEN))) {
+    // Keep this attempt available for a corrected secret until its short TTL expires.
     return responseWithCookies(authMessagePage('Autorisation refusée', 'Secret personnel incorrect.'), {
-      status: 401,
-      cookies: clearAuthCookies()
+      status: 401
     });
+  }
+
+  // Consume only an authenticated, fully validated authorization attempt.
+  // Invalid forms and mistaken secrets must not invalidate another valid attempt.
+  try {
+    await env.OAUTH_KV.delete(pendingKey);
+  } catch {
+    return oauthDiagnosticError('STORAGE_DELETE_FAILED', 503, stateToken);
   }
 
   let redirectTo;
@@ -729,7 +735,7 @@ async function completePersonalAuthorization(request, env) {
   } catch {
     return responseWithCookies(authMessagePage('Autorisation impossible', 'Le code OAuth n’a pas pu être créé.'), {
       status: 500,
-      cookies: clearAuthCookies()
+      cookies: clearAuthCookies(stateToken)
     });
   }
 
@@ -738,7 +744,7 @@ async function completePersonalAuthorization(request, env) {
     Location: redirectTo,
     'X-Content-Type-Options': 'nosniff'
   });
-  for (const cookie of clearAuthCookies()) headers.append('Set-Cookie', cookie);
+  for (const cookie of clearAuthCookies(stateToken)) headers.append('Set-Cookie', cookie);
   return new Response(null, { status: 302, headers });
 }
 
