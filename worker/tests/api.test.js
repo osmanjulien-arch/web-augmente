@@ -3,6 +3,8 @@ import { InMemoryTransport } from '@modelcontextprotocol/server';
 import { test, vi } from 'vitest';
 import worker, {
   OAUTH_SCOPE,
+  OAUTH_WRITE_SCOPE,
+  mcpApiHandler,
   OAUTH_STATE_PREFIX,
   OAUTH_STATE_TTL_SECONDS,
   UNTRUSTED_CONTENT_WARNING,
@@ -186,8 +188,8 @@ async function pkceChallenge(verifier) {
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-async function createMcpRpc(testEnv) {
-  const server = createWebAugmenteMcpServer(testEnv);
+async function createMcpRpc(testEnv, scopes) {
+  const server = createWebAugmenteMcpServer(testEnv, scopes);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const pending = new Map();
   let nextId = 1;
@@ -224,6 +226,64 @@ test('health is public and CORS-enabled', async () => {
   assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
   assert.equal(data.ok, true);
   assert.equal(data.action, 'health');
+});
+
+test('context tools are read-only by default and writes require verified scopes', async () => {
+  for (const scopes of [undefined, [OAUTH_SCOPE], [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]]) {
+    const mcp = await createMcpRpc(env(), scopes);
+    try {
+      const listed = await mcp.rpc('tools/list');
+      assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), scopes?.includes(OAUTH_WRITE_SCOPE) || false);
+      for (const name of ['memory_overview', 'memory_load', 'memory_get']) {
+        assert.ok(listed.result.tools.find(t => t.name === name));
+      }
+      const missing = await mcp.rpc('tools/call', { name: 'memory_overview', arguments: {} });
+      assert.equal(JSON.parse(missing.result.content[0].text).error, 'not_configured');
+      const save = await mcp.rpc('tools/call', { name: 'memory_save', arguments: {
+        key: 'a', project: 'p', summary: 's', body: 'b', source: 'user',
+        source_created_at: '2026-10-16T10:00:00Z', expected_version: 0
+      } });
+      if (scopes?.includes(OAUTH_WRITE_SCOPE)) assert.equal(JSON.parse(save.result.content[0].text).error, 'not_configured');
+      else assert.ok(save.error || save.result?.isError);
+    } finally { await mcp.clientTransport.close(); await mcp.server.close(); }
+  }
+});
+
+test('client props cannot escalate verified read token; malformed scopes are denied', async () => {
+  const request = () => new Request('https://wa.example/mcp', {
+    method: 'POST', headers: { Authorization: 'Bearer test-only', Accept: 'application/json, text/event-stream', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+  });
+  const testEnv = env();
+  testEnv.OAUTH_PROVIDER = { unwrapToken: async () => ({ scope: [OAUTH_SCOPE], props: { scope: [OAUTH_WRITE_SCOPE] } }) };
+  const response = await mcpApiHandler.fetch(request(), testEnv, { ...executionContext(), props: { scope: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] } });
+  const text = await response.text();
+  const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
+  assert.equal(response.status, 200);
+  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), false);
+  for (const scope of [undefined, 'memory:read memory:write', [OAUTH_WRITE_SCOPE], ['not-memory:read']]) {
+    testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({ scope });
+    assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
+  }
+  testEnv.OAUTH_PROVIDER.unwrapToken = async () => { throw new Error('token rejection'); };
+  assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
+});
+
+test('write scope is granted only after explicit requested-scope consent', async () => {
+  const { testEnv, completed } = oauthEnv();
+  testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), scope: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] });
+  const start = await beginTestAuthorization(testEnv);
+  assert.match(start.html, /memory:write/);
+  assert.match(start.html, /Autoriser la lecture et/);
+  assert.equal(completed.length, 0);
+  const response = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
+  assert.equal(response.status, 302);
+  assert.deepEqual(completed[0].scope, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  for (const scope of [[], [OAUTH_WRITE_SCOPE], [OAUTH_SCOPE, 'admin']]) {
+    testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), scope });
+    const rejected = await handleAuthorize(new Request('https://wa.example/authorize'), testEnv);
+    assert.equal(new URL(rejected.headers.get('Location')).searchParams.get('error'), 'invalid_scope');
+  }
 });
 
 test('private actions reject an invalid token', async () => {
@@ -299,7 +359,7 @@ test('OAuth protected-resource and authorization-server metadata are accessible'
   const protectedMetadata = await protectedResponse.json();
   assert.equal(protectedResponse.status, 200);
   assert.equal(protectedMetadata.resource, 'https://web-augmente-api.osmanjulien-arch.workers.dev/mcp');
-  assert.deepEqual(protectedMetadata.scopes_supported, [OAUTH_SCOPE]);
+  assert.deepEqual(protectedMetadata.scopes_supported, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
 
   const serverResponse = await worker.fetch(new Request(
     'https://wa.example/.well-known/oauth-authorization-server'
@@ -309,15 +369,17 @@ test('OAuth protected-resource and authorization-server metadata are accessible'
   assert.equal(serverMetadata.authorization_endpoint, 'https://wa.example/authorize');
   assert.equal(serverMetadata.token_endpoint, 'https://wa.example/oauth/token');
   assert.equal(serverMetadata.registration_endpoint, 'https://wa.example/oauth/register');
-  assert.deepEqual(serverMetadata.scopes_supported, [OAUTH_SCOPE]);
+  assert.deepEqual(serverMetadata.scopes_supported, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
   assert.ok(serverMetadata.grant_types_supported.includes('refresh_token'));
   assert.deepEqual(serverMetadata.code_challenge_methods_supported, ['S256']);
 });
 
 test.each([
-  'https://client.example/callback',
-  'https://chatgpt.com/connector_platform_oauth_redirect'
-])('the official OAuth provider completes PKCE and MCP for %s', async (redirectUri) => {
+  ['https://client.example/callback', false],
+  ['https://chatgpt.com/connector_platform_oauth_redirect', false],
+  ['https://chatgpt.com/connector_platform_oauth_redirect', true]
+])('the official OAuth provider completes PKCE and MCP for %s (write=%s)', async (redirectUri, write) => {
+  const requestedScope = write ? `${OAUTH_SCOPE} ${OAUTH_WRITE_SCOPE}` : OAUTH_SCOPE;
   const origin = 'https://web-augmente-api.osmanjulien-arch.workers.dev';
   const testEnv = env();
   const registration = await worker.fetch(new Request(`${origin}/oauth/register`, {
@@ -340,7 +402,7 @@ test.each([
   authorizeUrl.searchParams.set('response_type', 'code');
   authorizeUrl.searchParams.set('client_id', registeredClient.client_id);
   authorizeUrl.searchParams.set('redirect_uri', redirectUri);
-  authorizeUrl.searchParams.set('scope', OAUTH_SCOPE);
+  authorizeUrl.searchParams.set('scope', requestedScope);
   authorizeUrl.searchParams.set('state', 'integration-state');
   authorizeUrl.searchParams.set('code_challenge', await pkceChallenge(verifier));
   authorizeUrl.searchParams.set('code_challenge_method', 'S256');
@@ -391,7 +453,7 @@ test.each([
   }), testEnv, executionContext());
   const tokens = await tokenResponse.json();
   assert.equal(tokenResponse.status, 200);
-  assert.equal(tokens.scope, OAUTH_SCOPE);
+  assert.equal(tokens.scope, requestedScope);
   assert.ok(tokens.access_token);
   assert.ok(tokens.refresh_token);
 
@@ -419,6 +481,17 @@ test.each([
   const initialized = JSON.parse(dataLine ? dataLine[1] : mcpBody);
   assert.equal(mcpResponse.status, 200, JSON.stringify(initialized));
   assert.equal(initialized.result.serverInfo.name, 'web-augmente-v1');
+  const toolsResponse = await worker.fetch(new Request(`${origin}/mcp`, {
+    method: 'POST',
+    headers: { Accept: 'application/json, text/event-stream', Authorization: `Bearer ${tokens.access_token}`,
+      'Content-Type': 'application/json', Host: new URL(origin).host },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })
+  }), testEnv, executionContext());
+  const text = await toolsResponse.text();
+  const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
+  assert.equal(toolsResponse.status, 200);
+  assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), write);
+
 });
 
 test('ChatGPT consent permits only its fixed callback and preserves form security', async () => {
@@ -713,6 +786,9 @@ test('MCP exposes the five high-level France Travail tools alongside the existin
       'france_travail_jobs_search',
       'france_travail_market_analysis',
       'france_travail_training_analysis',
+      'memory_get',
+      'memory_load',
+      'memory_overview',
       'wa_get_last_page'
     ]);
     for (const name of ['france_travail_jobs_search', 'france_travail_company_prospects', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis']) {
