@@ -1032,6 +1032,38 @@ function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE]) {
   return server;
 }
 
+// Compatibility adapter: this MCP SDK omits securitySchemes from tools/list.
+// ChatGPT requires the standard top-level tool metadata for scope upgrades.
+async function addToolSecuritySchemes(response) {
+  if (!response.ok) return response;
+  const type = response.headers.get('content-type') || '';
+  if (!type.includes('text/event-stream') && !type.includes('application/json')) return response;
+  const wire = await response.text();
+  let changed = false;
+  const addSchemes = payload => {
+    if (!Array.isArray(payload?.result?.tools)) return payload;
+    for (const tool of payload.result.tools) {
+      if (!['memory_overview', 'memory_load', 'memory_get', 'memory_save'].includes(tool.name)) continue;
+      tool.securitySchemes = [{ type: 'oauth2', scopes: tool.name === 'memory_save'
+        ? [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] : [OAUTH_SCOPE] }];
+      changed = true;
+    }
+    return payload;
+  };
+  let converted = wire;
+  try {
+    if (type.includes('application/json')) converted = JSON.stringify(addSchemes(JSON.parse(wire)));
+    else converted = wire.replace(/^data: (.+)$/gm, (line, raw) => {
+      const payload = JSON.parse(raw);
+      return `data: ${JSON.stringify(addSchemes(payload))}`;
+    });
+  } catch { return new Response(wire, response); }
+  if (!changed) return new Response(wire, response);
+  const headers = new Headers(response.headers);
+  headers.delete('content-length');
+  return new Response(converted, { status: response.status, statusText: response.statusText, headers });
+}
+
 const mcpApiHandler = {
   async fetch(request, env, ctx) {
     const authorization = request.headers.get('Authorization') || '';
@@ -1050,12 +1082,15 @@ const mcpApiHandler = {
     }
 
     const verifiedScopes = [...token.scope];
+    const rpc = request.method === 'POST'
+      ? await request.clone().json().catch(() => null) : null;
     const handler = createMcpHandler(() => createWebAugmenteMcpServer(env, verifiedScopes), {
       route: '/mcp',
       corsOptions: false,
       authContext: { props: { scope: verifiedScopes } }
     });
-    return handler(request, env, ctx);
+    const response = await handler(request, env, ctx);
+    return rpc?.method === 'tools/list' ? addToolSecuritySchemes(response) : response;
   }
 };
 

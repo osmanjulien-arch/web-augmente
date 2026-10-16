@@ -42,9 +42,10 @@ It registers `memory_overview`, `memory_load`, and `memory_get` alongside the
 existing tools. The `memory_save` descriptor is visible to read-only clients,
 but an unprivileged call returns `insufficient_scope` and an MCP OAuth
 re-authorization challenge. Without a verified `memory:write` grant, the
-write callback never reaches D1. The installed SDK publishes per-tool OAuth
-requirements through the documented compatibility `_meta.securitySchemes`
-field (it does not yet forward top-level `securitySchemes`).
+write callback never reaches D1. The installed SDK omits top-level
+`securitySchemes`, so the MCP `tools/list` HTTP adapter adds the standard
+per-tool field for ChatGPT and keeps `_meta.securitySchemes` as a legacy
+compatibility mirror. Non-list requests and tool execution remain unmodified.
 
 For writes the client must explicitly request **both** `memory:read memory:write`
 and the owner must submit the consent form showing both permissions. Merely

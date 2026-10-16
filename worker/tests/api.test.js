@@ -269,6 +269,10 @@ test('client props cannot escalate verified read token; malformed scopes are den
   assert.equal(response.status, 200);
   assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
   assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save').securitySchemes,
+    [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_load').securitySchemes,
+    [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
   for (const scope of [undefined, 'memory:read memory:write', [OAUTH_WRITE_SCOPE], ['not-memory:read']]) {
     testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({ scope });
     assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
