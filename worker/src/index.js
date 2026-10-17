@@ -731,6 +731,9 @@ async function completePersonalAuthorization(request, env) {
       userId: 'wa-personal-user',
       metadata: { clientName: pending.clientName },
       scope: [...new Set(pending.oauthRequest.scope)],
+      // ChatGPT plugins share their CIMD client ID and callback URL.
+      // Authorizing one must not revoke another plugin's refresh grant.
+      revokeExistingGrants: false,
       props: { userId: 'wa-personal-user', scope: [...new Set(pending.oauthRequest.scope)] }
     }));
   } catch {

@@ -291,6 +291,8 @@ test('write scope is granted only after explicit requested-scope consent', async
   const response = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
   assert.equal(response.status, 302);
   assert.deepEqual(completed[0].scope, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.equal(completed[0].revokeExistingGrants, false,
+    'A second ChatGPT plugin must not revoke earlier grants sharing the same OAuth client');
   for (const scope of [[], [OAUTH_WRITE_SCOPE], [OAUTH_SCOPE, 'admin']]) {
     testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), scope });
     const rejected = await handleAuthorize(new Request('https://wa.example/authorize'), testEnv);
@@ -485,6 +487,50 @@ test.each([
   assert.ok(refreshed.access_token);
   assert.ok(refreshed.refresh_token);
   assert.equal(refreshed.scope, requestedScope);
+
+  // A second authorization by the same client must preserve the first grant.
+  // ChatGPT custom plugins share a CIMD client ID and the same redirect URI.
+  const secondAuthorizeUrl = new URL(authorizeUrl);
+  secondAuthorizeUrl.searchParams.set('state', 'integration-state-second');
+  const secondAuthorize = await worker.fetch(new Request(secondAuthorizeUrl), testEnv, executionContext());
+  const secondHtml = await secondAuthorize.text();
+  assert.equal(secondAuthorize.status, 200);
+  const secondStart = {
+    cookies: authorizationCookies(secondAuthorize),
+    stateToken: hiddenValue(secondHtml, 'state_token'),
+    csrfToken: hiddenValue(secondHtml, 'csrf_token')
+  };
+  const secondApproval = await worker.fetch(authorizationPost(secondStart, TOKEN), testEnv, executionContext());
+  assert.equal(secondApproval.status, 302);
+  const secondCode = new URL(secondApproval.headers.get('Location')).searchParams.get('code');
+  const secondTokenResponse = await worker.fetch(new Request(`${origin}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: registeredClient.client_id,
+      redirect_uri: redirectUri,
+      code: secondCode,
+      code_verifier: verifier,
+      resource: `${origin}/mcp`
+    }).toString()
+  }), testEnv, executionContext());
+  assert.equal(secondTokenResponse.status, 200);
+  const secondTokens = await secondTokenResponse.json();
+  assert.ok(secondTokens.refresh_token);
+
+  const originalGrantRefresh = await worker.fetch(new Request(`${origin}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: registeredClient.client_id,
+      refresh_token: refreshed.refresh_token
+    }).toString()
+  }), testEnv, executionContext());
+  const originalGrantResult = await originalGrantRefresh.json();
+  assert.equal(originalGrantRefresh.status, 200, JSON.stringify(originalGrantResult));
+  assert.ok(originalGrantResult.access_token);
 
   const mcpResponse = await worker.fetch(new Request(`${origin}/mcp`, {
     method: 'POST',
