@@ -157,7 +157,7 @@ async function beginTestAuthorization(testEnv) {
   };
 }
 
-function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret) {
+function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret, ownerConsent = false) {
   return new Request('https://wa.example/authorize', {
     method: 'POST',
     headers: {
@@ -167,7 +167,8 @@ function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret) {
     body: new URLSearchParams({
       state_token: stateToken,
       csrf_token: csrfToken,
-      personal_secret: personalSecret
+      personal_secret: personalSecret,
+      ...(ownerConsent ? { owner_write_consent: 'yes' } : {})
     }).toString()
   });
 }
@@ -235,7 +236,7 @@ test('context tools are read-only by default and writes require verified scopes'
       const listed = await mcp.rpc('tools/list');
       const saveTool = listed.result.tools.find(t => t.name === 'memory_save');
       assert.ok(saveTool, 'Write tool must be discoverable before OAuth scope upgrade');
-      assert.deepEqual(saveTool._meta.securitySchemes, [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
+      assert.deepEqual(saveTool._meta.securitySchemes, [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
       for (const name of ['memory_overview', 'memory_load', 'memory_get']) {
         assert.ok(listed.result.tools.find(t => t.name === name));
       }
@@ -268,9 +269,9 @@ test('client props cannot escalate verified read token; malformed scopes are den
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(response.status, 200);
   assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
-  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE]);
   assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save').securitySchemes,
-    [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
+    [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
   assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_load').securitySchemes,
     [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
   for (const scope of [undefined, 'memory:read memory:write', [OAUTH_WRITE_SCOPE], ['not-memory:read']]) {
@@ -279,6 +280,78 @@ test('client props cannot escalate verified read token; malformed scopes are den
   }
   testEnv.OAUTH_PROVIDER.unwrapToken = async () => { throw new Error('token rejection'); };
   assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
+});
+
+test('owner-approved ChatGPT grant can write, but unapproved or foreign grants cannot', async () => {
+  const testEnv = env();
+  const grantId = 'GrantApproval20261017';
+  const ownerGrant = {
+    scope: [OAUTH_SCOPE],
+    userId: 'wa-personal-user',
+    grantId,
+    grant: {
+      clientId: 'https://chatgpt.com/oauth/client.json',
+      props: { userId: 'wa-personal-user' }
+    }
+  };
+  testEnv.OAUTH_PROVIDER = { unwrapToken: async () => ownerGrant };
+  const req = () => new Request('https://wa.example/mcp', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer example-validated-by-mock',
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 10, method: 'tools/call',
+      params: { name: 'memory_save', arguments: {
+        key: 'diagnostics/test', expected_version: 0, project: 'mcp-diagnostics',
+        summary: 'Test', body: 'Test', source: 'User',
+        source_created_at: '2026-10-17T12:00:00Z'
+      } }
+    })
+  });
+  const call = async () => {
+    const response = await mcpApiHandler.fetch(req(), testEnv, executionContext());
+    assert.equal(response.status, 200);
+    const wire = await response.text();
+    const result = JSON.parse(wire.match(/^data:\s*(.+)$/m)?.[1] || wire);
+    return JSON.parse(result.result.content[0].text);
+  };
+  assert.equal((await call()).error, 'insufficient_scope');
+  await testEnv.WA_MEMORY.put(`mcp:owner-write-approved:${grantId}`, 'approved');
+  assert.equal((await call()).error, 'not_configured');
+  testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({
+    ...ownerGrant, grant: { clientId: 'https://evil.example', props: { userId: 'wa-personal-user' } }
+  });
+  assert.equal((await call()).error, 'insufficient_scope');
+  testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({
+    ...ownerGrant, userId: 'not-the-owner'
+  });
+  assert.equal((await call()).error, 'insufficient_scope');
+});
+
+test('new ChatGPT read grant requires explicit separate write consent', async () => {
+  const { testEnv, completed } = oauthEnv();
+  const clientId = 'https://chatgpt.com/oauth/client.json';
+  const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect';
+  testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({
+    ...oauthRequest(), clientId, redirectUri, scope: [OAUTH_SCOPE]
+  });
+  testEnv.OAUTH_PROVIDER.lookupClient = async () => ({
+    clientId, clientName: 'ChatGPT', redirectUris: [redirectUri],
+    tokenEndpointAuthMethod: 'none'
+  });
+  const start = await beginTestAuthorization(testEnv);
+  assert.match(start.html, /owner_write_consent/);
+  const denied = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
+  assert.equal(denied.status, 400);
+  assert.equal(completed.length, 0);
+  const second = await beginTestAuthorization(testEnv);
+  const approved = await handleAuthorize(authorizationPost(second, TOKEN, true), testEnv);
+  assert.equal(approved.status, 302);
+  assert.deepEqual(completed[0].scope, [OAUTH_SCOPE]);
+  assert.equal(completed[0].props.ownerMemoryWriteConsent, true);
 });
 
 test('write scope is granted only after explicit requested-scope consent', async () => {
@@ -566,7 +639,7 @@ test.each([
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(toolsResponse.status, 200);
   assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
-  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE]);
 
 });
 
