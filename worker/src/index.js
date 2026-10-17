@@ -3,6 +3,7 @@ import OAuthProvider, { AuthorizationError } from '@cloudflare/workers-oauth-pro
 import { createMcpHandler } from 'agents/mcp/server';
 import { z } from 'zod';
 import { registerContextMemoryTools, MEMORY_RESUME_INSTRUCTIONS } from './context-memory.js';
+import { EMPLOYMENT_CRON, runEmploymentCycle } from './employment-agent/runner.js';
 import {
   FranceTravailApiError,
   franceTravailEventsStatus,
@@ -510,6 +511,9 @@ function responseWithCookies(body, { status = 200, headers = {}, cookies = [], o
 
 function authorizePage({ client, oauthRequest, csrfToken, stateToken }) {
   const writeRequested = oauthRequest.scope.includes(OAUTH_WRITE_SCOPE);
+  const ownerConsentEligible = oauthRequest.clientId === 'https://chatgpt.com/oauth/client.json'
+    && oauthRequest.redirectUri === CHATGPT_OAUTH_CALLBACK
+    && !writeRequested;
   const clientName = escapeHtml(client.clientName || 'Client MCP sans nom');
   const clientId = escapeHtml(client.clientId);
   const clientUri = client.clientUri
@@ -541,12 +545,14 @@ function authorizePage({ client, oauthRequest, csrfToken, stateToken }) {
     <p>Ce client demande les permissions suivantes :</p>
     <p class="scope"><strong>${escapeHtml(OAUTH_SCOPE)}</strong> — lire le contexte sauvegardé, la dernière page mémorisée et les données publiques France Travail.</p>
     ${writeRequested ? '<p class="scope"><strong>memory:write</strong> — enregistrer des notes et leurs nouvelles versions.</p>' : ''}
+    ${ownerConsentEligible ? '<p class="scope">Autorisation applicative distincte des scopes OAuth : vous autorisez cette connexion ChatGPT personnelle a enregistrer dans D1 uniquement les fiches validees explicitement. Le scope reste memory:read.</p>' : ''}
     <form method="post" action="/authorize" autocomplete="off">
       <input type="hidden" name="state_token" value="${escapeHtml(stateToken)}">
       <input type="hidden" name="csrf_token" value="${escapeHtml(csrfToken)}">
+      ${ownerConsentEligible ? '<label><input type="checkbox" name="owner_write_consent" value="yes" required style="display:inline-block;width:auto"> Je consens explicitement aux ecritures D1 depuis mon ChatGPT personnel pour les fiches que je valide.</label>' : ''}
       <label for="personal_secret">Secret personnel</label>
       <input id="personal_secret" name="personal_secret" type="password" required minlength="20" autocomplete="current-password">
-      <button type="submit">${writeRequested ? 'Autoriser la lecture et l’écriture' : 'Autoriser en lecture seule'}</button>
+      <button type="submit">${writeRequested ? 'Autoriser la lecture et l’écriture' : ownerConsentEligible ? 'Autoriser lecture et ecriture D1' : 'Autoriser en lecture seule'}</button>
     </form>
     <p class="muted">Le secret est envoyé uniquement dans ce formulaire HTTPS. Il n’est ni enregistré ni retourné.</p>
   </main>
@@ -702,6 +708,17 @@ async function completePersonalAuthorization(request, env) {
       cookies: clearAuthCookies(stateToken)
     });
   }
+  const ownerConsentEligible = pending.oauthRequest.clientId === 'https://chatgpt.com/oauth/client.json'
+    && pending.oauthRequest.redirectUri === CHATGPT_OAUTH_CALLBACK
+    && !pending.oauthRequest.scope.includes(OAUTH_WRITE_SCOPE);
+  const ownerMemoryWriteConsent = ownerConsentEligible && form.get('owner_write_consent') === 'yes';
+  if (ownerConsentEligible && !ownerMemoryWriteConsent) {
+    return responseWithCookies(authMessagePage('Consentement requis',
+      'Vous devez confirmer explicitement les ecritures D1 pour cette connexion personnelle.'), {
+      status: 400,
+      cookies: clearAuthCookies(stateToken)
+    });
+  }
   if (!env.WA_API_TOKEN || env.WA_API_TOKEN.length < 20) {
     return responseWithCookies(authMessagePage('Autorisation indisponible', 'Le serveur n’est pas configuré.'), {
       status: 503,
@@ -730,7 +747,10 @@ async function completePersonalAuthorization(request, env) {
       userId: 'wa-personal-user',
       metadata: { clientName: pending.clientName },
       scope: [...new Set(pending.oauthRequest.scope)],
-      props: { userId: 'wa-personal-user', scope: [...new Set(pending.oauthRequest.scope)] }
+      // ChatGPT plugins share their CIMD client ID and callback URL.
+      // Authorizing one must not revoke another plugin's refresh grant.
+      revokeExistingGrants: false,
+      props: { userId: 'wa-personal-user', scope: [...new Set(pending.oauthRequest.scope)], ownerMemoryWriteConsent }
     }));
   } catch {
     return responseWithCookies(authMessagePage('Autorisation impossible', 'Le code OAuth n’a pas pu être créé.'), {
@@ -754,7 +774,7 @@ async function handleAuthorize(request, env) {
   return responseWithCookies(authMessagePage('Méthode refusée', 'Utilise GET ou POST.'), { status: 405 });
 }
 
-function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE]) {
+function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE], ownerWriteApproved = false) {
   const server = new McpServer({
     name: 'web-augmente-v1',
     version: API_VERSION
@@ -771,7 +791,7 @@ function createWebAugmenteMcpServer(env, verifiedScopes = [OAUTH_SCOPE]) {
     content: z.string().nullable(),
     content_hash: z.string().nullable()
   });
-  registerContextMemoryTools(server, env, verifiedScopes);
+  registerContextMemoryTools(server, env, verifiedScopes, ownerWriteApproved);
   server.registerTool('france_travail_events_status', {
     title: 'Vérifier la connexion France Travail',
     description: 'Vérifie sans exposer aucun secret si l’API officielle Mes Evènements Emploi de France Travail est configurée côté Worker.',
@@ -1049,9 +1069,10 @@ async function addToolSecuritySchemes(response) {
   const addSchemes = payload => {
     if (!Array.isArray(payload?.result?.tools)) return payload;
     for (const tool of payload.result.tools) {
-      if (!['memory_overview', 'memory_load', 'memory_get', 'memory_save'].includes(tool.name)) continue;
-      tool.securitySchemes = [{ type: 'oauth2', scopes: tool.name === 'memory_save'
-        ? [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] : [OAUTH_SCOPE] }];
+      if (!['memory_search', 'memory_overview', 'memory_load', 'memory_get', 'memory_save'].includes(tool.name)) continue;
+      // OAuth scope is a baseline; memory_save additionally enforces an owner-approved
+      // per-grant write policy, or the dedicated memory:write scope, at runtime.
+      tool.securitySchemes = [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }];
       changed = true;
     }
     return payload;
@@ -1090,7 +1111,24 @@ const mcpApiHandler = {
     const verifiedScopes = [...token.scope];
     const rpc = request.method === 'POST'
       ? await request.clone().json().catch(() => null) : null;
-    const handler = createMcpHandler(() => createWebAugmenteMcpServer(env, verifiedScopes), {
+    // Independent application-level authorization, approved by the owner.
+    // A read-only OAuth scope NEVER grants write access on its own. Only the
+    // specifically approved personal ChatGPT grant (or memory:write scope) can.
+    const isOwnerChatGPTGrant = token.userId === 'wa-personal-user'
+      && token.grant?.clientId === 'https://chatgpt.com/oauth/client.json'
+      && token.grant?.props?.userId === 'wa-personal-user';
+    const approvedByConsent = isOwnerChatGPTGrant
+      && token.grant?.props?.ownerMemoryWriteConsent === true;
+    let approvedGrant = false;
+    if (rpc?.method === 'tools/call' && rpc.params?.name === 'memory_save'
+      && isOwnerChatGPTGrant && /^[a-zA-Z0-9_-]{12,64}$/.test(token.grantId || '')) {
+      try {
+        approvedGrant = await env.WA_MEMORY?.get(`mcp:owner-write-approved:${token.grantId}`) === 'approved';
+      } catch { approvedGrant = false; } // Fail closed without breaking reads.
+    }
+    const ownerWriteApproved = verifiedScopes.includes(OAUTH_WRITE_SCOPE)
+      || approvedByConsent || approvedGrant;
+    const handler = createMcpHandler(() => createWebAugmenteMcpServer(env, verifiedScopes, ownerWriteApproved), {
       route: '/mcp',
       corsOptions: false,
       authContext: { props: { scope: verifiedScopes } }
@@ -1129,7 +1167,19 @@ const oauthProvider = new OAuthProvider({
   refreshTokenTTL: 30 * 24 * 60 * 60
 });
 
-export default oauthProvider;
+export default {
+  fetch(request, env, ctx) {
+    return oauthProvider.fetch(request, env, ctx);
+  },
+  scheduled(controller, env, ctx) {
+    if (controller.cron !== EMPLOYMENT_CRON) return;
+    ctx.waitUntil(
+      runEmploymentCycle(env)
+        .then(result => console.log('employment_agent_cycle', JSON.stringify(result.metrics)))
+        .catch(error => { console.error('employment_agent_failed', String(error?.code || error?.name || 'unknown')); throw error; })
+    );
+  }
+};
 export {
   OAUTH_SCOPE,
   OAUTH_WRITE_SCOPE,

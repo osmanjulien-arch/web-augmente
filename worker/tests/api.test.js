@@ -157,7 +157,7 @@ async function beginTestAuthorization(testEnv) {
   };
 }
 
-function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret) {
+function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret, ownerConsent = false) {
   return new Request('https://wa.example/authorize', {
     method: 'POST',
     headers: {
@@ -167,7 +167,8 @@ function authorizationPost({ stateToken, csrfToken, cookies }, personalSecret) {
     body: new URLSearchParams({
       state_token: stateToken,
       csrf_token: csrfToken,
-      personal_secret: personalSecret
+      personal_secret: personalSecret,
+      ...(ownerConsent ? { owner_write_consent: 'yes' } : {})
     }).toString()
   });
 }
@@ -235,7 +236,7 @@ test('context tools are read-only by default and writes require verified scopes'
       const listed = await mcp.rpc('tools/list');
       const saveTool = listed.result.tools.find(t => t.name === 'memory_save');
       assert.ok(saveTool, 'Write tool must be discoverable before OAuth scope upgrade');
-      assert.deepEqual(saveTool._meta.securitySchemes, [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
+      assert.deepEqual(saveTool._meta.securitySchemes, [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
       for (const name of ['memory_overview', 'memory_load', 'memory_get']) {
         assert.ok(listed.result.tools.find(t => t.name === name));
       }
@@ -268,9 +269,9 @@ test('client props cannot escalate verified read token; malformed scopes are den
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(response.status, 200);
   assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
-  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE]);
   assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save').securitySchemes,
-    [{ type: 'oauth2', scopes: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE] }]);
+    [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
   assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_load').securitySchemes,
     [{ type: 'oauth2', scopes: [OAUTH_SCOPE] }]);
   for (const scope of [undefined, 'memory:read memory:write', [OAUTH_WRITE_SCOPE], ['not-memory:read']]) {
@@ -279,6 +280,78 @@ test('client props cannot escalate verified read token; malformed scopes are den
   }
   testEnv.OAUTH_PROVIDER.unwrapToken = async () => { throw new Error('token rejection'); };
   assert.equal((await mcpApiHandler.fetch(request(), testEnv, executionContext())).status, 403);
+});
+
+test('owner-approved ChatGPT grant can write, but unapproved or foreign grants cannot', async () => {
+  const testEnv = env();
+  const grantId = 'GrantApproval20261017';
+  const ownerGrant = {
+    scope: [OAUTH_SCOPE],
+    userId: 'wa-personal-user',
+    grantId,
+    grant: {
+      clientId: 'https://chatgpt.com/oauth/client.json',
+      props: { userId: 'wa-personal-user' }
+    }
+  };
+  testEnv.OAUTH_PROVIDER = { unwrapToken: async () => ownerGrant };
+  const req = () => new Request('https://wa.example/mcp', {
+    method: 'POST',
+    headers: {
+      Authorization: 'Bearer example-validated-by-mock',
+      Accept: 'application/json, text/event-stream',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0', id: 10, method: 'tools/call',
+      params: { name: 'memory_save', arguments: {
+        key: 'diagnostics/test', expected_version: 0, project: 'mcp-diagnostics',
+        summary: 'Test', body: 'Test', source: 'User',
+        source_created_at: '2026-10-17T12:00:00Z'
+      } }
+    })
+  });
+  const call = async () => {
+    const response = await mcpApiHandler.fetch(req(), testEnv, executionContext());
+    assert.equal(response.status, 200);
+    const wire = await response.text();
+    const result = JSON.parse(wire.match(/^data:\s*(.+)$/m)?.[1] || wire);
+    return JSON.parse(result.result.content[0].text);
+  };
+  assert.equal((await call()).error, 'insufficient_scope');
+  await testEnv.WA_MEMORY.put(`mcp:owner-write-approved:${grantId}`, 'approved');
+  assert.equal((await call()).error, 'not_configured');
+  testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({
+    ...ownerGrant, grant: { clientId: 'https://evil.example', props: { userId: 'wa-personal-user' } }
+  });
+  assert.equal((await call()).error, 'insufficient_scope');
+  testEnv.OAUTH_PROVIDER.unwrapToken = async () => ({
+    ...ownerGrant, userId: 'not-the-owner'
+  });
+  assert.equal((await call()).error, 'insufficient_scope');
+});
+
+test('new ChatGPT read grant requires explicit separate write consent', async () => {
+  const { testEnv, completed } = oauthEnv();
+  const clientId = 'https://chatgpt.com/oauth/client.json';
+  const redirectUri = 'https://chatgpt.com/connector_platform_oauth_redirect';
+  testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({
+    ...oauthRequest(), clientId, redirectUri, scope: [OAUTH_SCOPE]
+  });
+  testEnv.OAUTH_PROVIDER.lookupClient = async () => ({
+    clientId, clientName: 'ChatGPT', redirectUris: [redirectUri],
+    tokenEndpointAuthMethod: 'none'
+  });
+  const start = await beginTestAuthorization(testEnv);
+  assert.match(start.html, /owner_write_consent/);
+  const denied = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
+  assert.equal(denied.status, 400);
+  assert.equal(completed.length, 0);
+  const second = await beginTestAuthorization(testEnv);
+  const approved = await handleAuthorize(authorizationPost(second, TOKEN, true), testEnv);
+  assert.equal(approved.status, 302);
+  assert.deepEqual(completed[0].scope, [OAUTH_SCOPE]);
+  assert.equal(completed[0].props.ownerMemoryWriteConsent, true);
 });
 
 test('write scope is granted only after explicit requested-scope consent', async () => {
@@ -291,6 +364,8 @@ test('write scope is granted only after explicit requested-scope consent', async
   const response = await handleAuthorize(authorizationPost(start, TOKEN), testEnv);
   assert.equal(response.status, 302);
   assert.deepEqual(completed[0].scope, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.equal(completed[0].revokeExistingGrants, false,
+    'A second ChatGPT plugin must not revoke earlier grants sharing the same OAuth client');
   for (const scope of [[], [OAUTH_WRITE_SCOPE], [OAUTH_SCOPE, 'admin']]) {
     testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), scope });
     const rejected = await handleAuthorize(new Request('https://wa.example/authorize'), testEnv);
@@ -486,6 +561,50 @@ test.each([
   assert.ok(refreshed.refresh_token);
   assert.equal(refreshed.scope, requestedScope);
 
+  // A second authorization by the same client must preserve the first grant.
+  // ChatGPT custom plugins share a CIMD client ID and the same redirect URI.
+  const secondAuthorizeUrl = new URL(authorizeUrl);
+  secondAuthorizeUrl.searchParams.set('state', 'integration-state-second');
+  const secondAuthorize = await worker.fetch(new Request(secondAuthorizeUrl), testEnv, executionContext());
+  const secondHtml = await secondAuthorize.text();
+  assert.equal(secondAuthorize.status, 200);
+  const secondStart = {
+    cookies: authorizationCookies(secondAuthorize),
+    stateToken: hiddenValue(secondHtml, 'state_token'),
+    csrfToken: hiddenValue(secondHtml, 'csrf_token')
+  };
+  const secondApproval = await worker.fetch(authorizationPost(secondStart, TOKEN), testEnv, executionContext());
+  assert.equal(secondApproval.status, 302);
+  const secondCode = new URL(secondApproval.headers.get('Location')).searchParams.get('code');
+  const secondTokenResponse = await worker.fetch(new Request(`${origin}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: registeredClient.client_id,
+      redirect_uri: redirectUri,
+      code: secondCode,
+      code_verifier: verifier,
+      resource: `${origin}/mcp`
+    }).toString()
+  }), testEnv, executionContext());
+  assert.equal(secondTokenResponse.status, 200);
+  const secondTokens = await secondTokenResponse.json();
+  assert.ok(secondTokens.refresh_token);
+
+  const originalGrantRefresh = await worker.fetch(new Request(`${origin}/oauth/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: registeredClient.client_id,
+      refresh_token: refreshed.refresh_token
+    }).toString()
+  }), testEnv, executionContext());
+  const originalGrantResult = await originalGrantRefresh.json();
+  assert.equal(originalGrantRefresh.status, 200, JSON.stringify(originalGrantResult));
+  assert.ok(originalGrantResult.access_token);
+
   const mcpResponse = await worker.fetch(new Request(`${origin}/mcp`, {
     method: 'POST',
     headers: {
@@ -520,7 +639,7 @@ test.each([
   const listed = JSON.parse(text.match(/^data:\s*(.+)$/m)?.[1] || text);
   assert.equal(toolsResponse.status, 200);
   assert.equal(listed.result.tools.some(t => t.name === 'memory_save'), true);
-  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(listed.result.tools.find(t => t.name === 'memory_save')._meta.securitySchemes[0].scopes, [OAUTH_SCOPE]);
 
 });
 
@@ -858,6 +977,7 @@ test('MCP exposes the high-level France Travail tools and statistical references
       'memory_load',
       'memory_overview',
       'memory_save',
+      'memory_search',
       'wa_get_last_page'
     ]);
     for (const name of ['france_travail_jobs_search', 'france_travail_company_prospects', 'france_travail_job_analyze', 'france_travail_market_analysis', 'france_travail_training_analysis', 'france_travail_stats_reference']) {
