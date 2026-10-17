@@ -99,7 +99,7 @@ function oauthRequest() {
     responseType: 'code',
     clientId: 'test-client',
     redirectUri: 'https://client.example/callback',
-    scope: [OAUTH_SCOPE, OAUTH_WRITE_SCOPE],
+    scope: [OAUTH_SCOPE],
     state: 'client-state',
     codeChallenge: 'test-code-challenge',
     codeChallengeMethod: 'S256',
@@ -293,7 +293,7 @@ test('write scope is granted only after explicit requested-scope consent', async
   assert.deepEqual(completed[0].scope, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
   assert.equal(completed[0].revokeExistingGrants, false,
     'A second ChatGPT plugin must not revoke earlier grants sharing the same OAuth client');
-  for (const scope of [[], [OAUTH_SCOPE], [OAUTH_WRITE_SCOPE], [OAUTH_SCOPE, 'admin']]) {
+  for (const scope of [[], [OAUTH_WRITE_SCOPE], [OAUTH_SCOPE, 'admin']]) {
     testEnv.OAUTH_PROVIDER.parseAuthRequest = async () => ({ ...oauthRequest(), scope });
     const rejected = await handleAuthorize(new Request('https://wa.example/authorize'), testEnv);
     assert.equal(new URL(rejected.headers.get('Location')).searchParams.get('error'), 'invalid_scope');
@@ -389,7 +389,8 @@ test('OAuth protected-resource and authorization-server metadata are accessible'
 });
 
 test.each([
-  ['https://client.example/callback', true],
+  ['https://client.example/callback', false],
+  ['https://chatgpt.com/connector_platform_oauth_redirect', false],
   ['https://chatgpt.com/connector_platform_oauth_redirect', true]
 ])('the official OAuth provider completes PKCE and MCP for %s (write=%s)', async (redirectUri, write) => {
   const requestedScope = write ? `${OAUTH_SCOPE} ${OAUTH_WRITE_SCOPE}` : OAUTH_SCOPE;
@@ -672,7 +673,7 @@ test('OAuth state expires after ten minutes and a consumed state cannot be reuse
   const first = await handleAuthorize(authorizationPost(oneTimeStart, TOKEN), oneTime.testEnv);
   assert.equal(first.status, 302);
   assert.equal(oneTime.completed.length, 1);
-  assert.deepEqual(oneTime.completed[0].scope, [OAUTH_SCOPE, OAUTH_WRITE_SCOPE]);
+  assert.deepEqual(oneTime.completed[0].scope, [OAUTH_SCOPE]);
   const replay = await handleAuthorize(authorizationPost(oneTimeStart, TOKEN), oneTime.testEnv);
   assert.equal(replay.status, 400);
   assert.equal(oneTime.completed.length, 1);
