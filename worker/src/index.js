@@ -593,7 +593,7 @@ function authorizationErrorResponse(error) {
 function invalidScopeResponse(oauthRequest) {
   const redirect = new URL(oauthRequest.redirectUri);
   redirect.searchParams.set('error', 'invalid_scope');
-  redirect.searchParams.set('error_description', `Scope requis : ${OAUTH_SCOPE}. Scope optionnel : ${OAUTH_WRITE_SCOPE}.`);
+  redirect.searchParams.set('error_description', `Scopes requis pour ce MCP : ${OAUTH_SCOPE} et ${OAUTH_WRITE_SCOPE}.`);
   if (oauthRequest.state) redirect.searchParams.set('state', oauthRequest.state);
   if (oauthRequest.issuer) redirect.searchParams.set('iss', oauthRequest.issuer);
   return Response.redirect(redirect.toString(), 302);
@@ -602,6 +602,7 @@ function invalidScopeResponse(oauthRequest) {
 function hasAllowedScopes(scopes) {
   return Array.isArray(scopes)
     && scopes.includes(OAUTH_SCOPE)
+    && scopes.includes(OAUTH_WRITE_SCOPE)
     && scopes.every(scope => scope === OAUTH_SCOPE || scope === OAUTH_WRITE_SCOPE);
 }
 
