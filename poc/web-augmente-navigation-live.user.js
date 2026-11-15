@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Augmenté - Navigation Live POC
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.0
+// @version      0.1.1
 // @description  Partage volontairement le contenu de l'onglet actif avec le MCP Web Augmenté.
 // @match        *://*/*
 // @run-at       document-idle
@@ -20,6 +20,7 @@
   const ENDPOINT = 'https://web-augmente-api.osmanjulien-arch.workers.dev/api/wa';
   const KEY_ENABLED = 'wa_live_enabled_v1';
   const KEY_TOKEN = 'wa_live_api_token_v1';
+  const KEY_AUTH_ERROR = 'wa_live_auth_error_v1';
   const CHECK_INTERVAL_MS = 2000;
   const MAX_CHARS = 32000;
 
@@ -29,6 +30,7 @@
   // Les valeurs GM sont stockées par l'extension Userscripts, pas dans le localStorage du site.
   let enabled = Boolean(await GM.getValue(KEY_ENABLED, false));
   let token = String(await GM.getValue(KEY_TOKEN, '') || '');
+  let authError = Boolean(await GM.getValue(KEY_AUTH_ERROR, false));
   let sending = false;
   let lastSuccessfulSignature = '';
   let error = false;
@@ -45,7 +47,8 @@
   document.body.appendChild(button);
 
   function paint() {
-    button.textContent = error ? 'WA Live : erreur' : (enabled ? 'WA Live : ON' : 'WA Live : OFF');
+    button.textContent = authError ? 'WA Live : jeton 401' :
+      (error ? 'WA Live : erreur' : (enabled ? 'WA Live : ON' : 'WA Live : OFF'));
     button.style.opacity = sending ? '0.65' : '1';
   }
 
@@ -74,12 +77,14 @@
       content,
       capture_type: 'page',
       captured_at: new Date().toISOString(),
-      client_version: 'wa-live-poc-0.1.0'
+      client_version: 'wa-live-poc-0.1.1'
     };
   }
 
   async function publishIfChanged() {
     if (!enabled || !token || sending || document.visibilityState === 'hidden') return;
+    // Ne pas extraire automatiquement le texte d'une page de connexion active.
+    if ([...document.querySelectorAll('input[type="password"]')].some(el => el.getClientRects().length)) return;
     const page = snapshot();
     if (!page.content) return;
     const signature = [page.url, page.title, page.content].join('\n');
@@ -98,14 +103,22 @@
         timeout: 10000
       });
       if (response.status === 200) {
-        lastSuccessfulSignature = signature;
-        error = false;
+        let result = null;
+        try { result = JSON.parse(response.responseText || '{}'); } catch {}
+        if (result?.ok === true && result.action === 'remember_page') {
+          lastSuccessfulSignature = signature;
+          authError = false;
+          error = false;
+        } else {
+          error = true; // Une réponse HTTP 200 ne suffit pas à confirmer la capture.
+        }
       } else if (response.status === 401) {
-        // En cas d'échec d'authentification, interrompre le partage.
+        // Ne jamais effacer le jeton sur une erreur réseau/authentification.
+        // Arrêter les envois et demander sa correction à la prochaine activation.
         enabled = false;
-        token = '';
+        authError = true;
         await GM.setValue(KEY_ENABLED, false);
-        await GM.deleteValue(KEY_TOKEN);
+        await GM.setValue(KEY_AUTH_ERROR, true);
         error = true;
       } else {
         error = true;
@@ -126,13 +139,17 @@
       paint();
       return;
     }
-    if (!token) {
+    if (!token || authError) {
       const entry = window.prompt(
-        'Colle ton jeton WA_API_TOKEN ici (jamais dans GitHub ni dans ChatGPT) :'
+        authError
+          ? 'WA LIVE : jeton refusé (401). Colle un jeton corrigé pour reprendre :'
+          : 'Colle ton jeton WA_API_TOKEN ici (jamais dans GitHub ni dans ChatGPT) :'
       );
       if (!entry || entry.trim().length < 20) return;
       token = entry.trim();
       await GM.setValue(KEY_TOKEN, token);
+      await GM.setValue(KEY_AUTH_ERROR, false);
+      authError = false;
     }
     enabled = true;
     error = false;
@@ -148,4 +165,6 @@
   setInterval(() => void publishIfChanged(), CHECK_INTERVAL_MS);
   document.addEventListener('visibilitychange', () => void publishIfChanged());
   window.addEventListener('pageshow', () => void publishIfChanged());
+  window.addEventListener('focus', () => void publishIfChanged());
+  window.addEventListener('online', () => void publishIfChanged());
 })();
