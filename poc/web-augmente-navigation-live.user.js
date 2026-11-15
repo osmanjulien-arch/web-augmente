@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Web Augmenté - Navigation Live POC
 // @namespace    https://github.com/osmanjulien-arch/web-augmente
-// @version      0.1.2
+// @version      0.1.3
 // @updateURL    https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/prototype/navigation-live-20261014/poc/web-augmente-navigation-live.meta.js
 // @downloadURL  https://raw.githubusercontent.com/osmanjulien-arch/web-augmente/prototype/navigation-live-20261014/poc/web-augmente-navigation-live.user.js
 // @description  Partage volontairement le contenu de l'onglet actif avec le MCP Web Augmenté.
@@ -23,7 +23,7 @@
   const KEY_ENABLED = 'wa_live_enabled_v1';
   const KEY_TOKEN = 'wa_live_api_token_v1';
   const KEY_AUTH_ERROR = 'wa_live_auth_error_v1';
-  const CHECK_INTERVAL_MS = 2000;
+  const CHECK_INTERVAL_MS = 7000;
   const MAX_CHARS = 32000;
 
   if (!document.body || !/^https?:$/.test(location.protocol) ||
@@ -36,6 +36,7 @@
   let sending = false;
   let lastSuccessfulSignature = '';
   let error = false;
+  let lastError = 'erreur';
 
   const button = document.createElement('button');
   button.type = 'button';
@@ -50,7 +51,7 @@
 
   function paint() {
     button.textContent = authError ? 'WA Live : jeton 401' :
-      (error ? 'WA Live : erreur' : (enabled ? 'WA Live : ON' : 'WA Live : OFF'));
+      (error ? `WA Live : ${lastError}` : (enabled ? 'WA Live : ON' : 'WA Live : OFF'));
     button.style.opacity = sending ? '0.65' : '1';
   }
 
@@ -79,7 +80,7 @@
       content,
       capture_type: 'page',
       captured_at: new Date().toISOString(),
-      client_version: 'wa-live-poc-0.1.2'
+      client_version: 'wa-live-poc-0.1.3'
     };
   }
 
@@ -102,6 +103,7 @@
           'Content-Type': 'application/json'
         },
         data: JSON.stringify({ action: 'remember_page', page }),
+        responseType: 'text',
         timeout: 10000
       });
       if (response.status === 200) {
@@ -111,8 +113,10 @@
           lastSuccessfulSignature = signature;
           authError = false;
           error = false;
+          lastError = '';
         } else {
-          error = true; // Une réponse HTTP 200 ne suffit pas à confirmer la capture.
+          error = true;
+          lastError = 'réponse'; // HTTP 200 seul ne confirme pas la capture.
         }
       } else if (response.status === 401) {
         // Ne jamais effacer le jeton sur une erreur réseau/authentification.
@@ -124,9 +128,11 @@
         error = true;
       } else {
         error = true;
+        lastError = response.status ? `HTTP ${response.status}` : 'réseau';
       }
     } catch {
       error = true;
+      lastError = 'réseau';
     } finally {
       sending = false;
       paint();
