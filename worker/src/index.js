@@ -257,8 +257,49 @@ function mergeStatus(previous, requested) {
   return 'inbox';
 }
 
+async function rememberLivePageInD1(env, page) {
+  if (!env.CONTEXT_DB) throw new HttpError(503, 'live_storage_unavailable', 'Stockage WA Live indisponible.');
+  const now = new Date().toISOString();
+  const id = await sha256Hex(page.canonical_url);
+  const contentHash = await sha256Hex(page.content);
+  const capture = {
+    id,
+    canonical_url: page.canonical_url,
+    source_url: page.source_url,
+    title: page.title,
+    domain: page.domain,
+    captured_at: now,
+    client_captured_at: page.captured_at,
+    client_version: page.client_version,
+    capture_type: page.capture_type,
+    content_hash: contentHash,
+    content: page.content,
+    status: 'inbox'
+  };
+  await env.CONTEXT_DB.prepare(
+    'INSERT INTO wa_live_latest (id, snapshot_json, updated_at) VALUES (1, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET snapshot_json=excluded.snapshot_json, updated_at=excluded.updated_at'
+  ).bind(JSON.stringify(capture), now).run();
+  return {
+    status: 'changed',
+    page: {
+      id,
+      canonical_url: page.canonical_url,
+      title: page.title,
+      domain: page.domain,
+      first_seen: now,
+      last_seen: now,
+      content_hash: contentHash,
+      capture_type: page.capture_type,
+      memory_status: 'inbox',
+      character_count: page.content.length
+    }
+  };
+}
+
 async function rememberPage(env, rawPage) {
   const page = parsePage(rawPage);
+  if (page.client_version?.startsWith('wa-live-poc-')) return rememberLivePageInD1(env, page);
   const now = new Date().toISOString();
   const id = await sha256Hex(page.canonical_url);
   const contentHash = await sha256Hex(page.content);
@@ -358,7 +399,20 @@ async function rememberPage(env, rawPage) {
 }
 
 async function getLastPage(env) {
-  return env.WA_MEMORY.get(LAST_PAGE_KEY, 'json');
+  const archivedPromise = env.WA_MEMORY.get(LAST_PAGE_KEY, 'json');
+  let live = null;
+  if (env.CONTEXT_DB) {
+    try {
+      const row = await env.CONTEXT_DB.prepare('SELECT snapshot_json FROM wa_live_latest WHERE id=1').first();
+      if (row?.snapshot_json) live = JSON.parse(row.snapshot_json);
+    } catch (error) {
+      console.error('wa_live_d1_read_failed', error instanceof Error ? error.message.slice(0, 120) : 'unknown');
+    }
+  }
+  const archived = await archivedPromise;
+  if (!archived) return live;
+  if (!live) return archived;
+  return Date.parse(live.captured_at) >= Date.parse(archived.captured_at) ? live : archived;
 }
 
 function lastPageForMcp(page) {
